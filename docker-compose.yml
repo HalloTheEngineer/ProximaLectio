@@ -1,0 +1,57 @@
+version: '3.8'
+
+services:
+  untis-bot:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: proxima_lectio
+    restart: always
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      # Discord Configuration
+      - VERBOSE=${VERBOSE:-1}
+      - DISCORD_TOKEN=${DISCORD_TOKEN}
+      - TZ=Europe/Berlin
+
+      # Database Configuration
+      # Note: 'db' matches the service name below
+      - DB_HOST=db
+      - DB_PORT=5432
+      - DB_USER=${DB_USER:-untisuser}
+      - DB_PASSWORD=${DB_PASSWORD:-untispass}
+      - DB_NAME=${DB_NAME:-untisdb}
+      - DB_SSLMODE=disable
+      # Final connection string for your Go app
+      - DB_CONNECTION_STRING=postgres://${DB_USER:-untisuser}:${DB_PASSWORD:-untispass}@db:5432/${DB_NAME:-untisdb}?sslmode=disable
+    volumes:
+      - bot_data:/root/database
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  db:
+    image: postgres:16-alpine
+    ports:
+      - "5432:5432"
+    container_name: proxima_lectio_db
+    restart: always
+    environment:
+      - POSTGRES_USER=${DB_USER:-untisuser}
+      - POSTGRES_PASSWORD=${DB_PASSWORD:-untispass}
+      - POSTGRES_DB=${DB_NAME:-untisdb}
+    volumes:
+      - pg_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-untisuser} -d ${DB_NAME:-untisdb}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  bot_data:
+  pg_data:
