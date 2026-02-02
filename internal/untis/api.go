@@ -126,6 +126,21 @@ type AppDataResponse struct {
 	} `json:"user"`
 }
 
+type Exam struct {
+	ID        int    `json:"id"`
+	Date      int    `json:"date"`      // Format: YYYYMMDD
+	StartTime int    `json:"startTime"` // Format: HHMM
+	EndTime   int    `json:"endTime"`   // Format: HHMM
+	Subject   string `json:"subject"`
+	Name      string `json:"name"`
+	ExamType  string `json:"examType"`
+}
+
+type loginResponse struct {
+	State    string `json:"state"`
+	SwitchUI bool   `json:"switchUI"`
+}
+
 // NewClient initializes the WebUntis client.
 // It returns an error if the baseURL is empty.
 func NewClient(school, username, password, baseURL string) (*Client, error) {
@@ -149,24 +164,49 @@ func NewClient(school, username, password, baseURL string) (*Client, error) {
 
 func (c *Client) Authenticate(ctx context.Context) error {
 	loginURL := fmt.Sprintf("%s/j_spring_security_check", c.baseURL)
+
 	data := url.Values{}
 	data.Set("school", c.school)
 	data.Set("j_username", c.username)
 	data.Set("j_password", c.password)
+	data.Set("token", "")
 
 	req, _ := http.NewRequestWithContext(ctx, "POST", loginURL, strings.NewReader(data.Encode()))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	req.Header.Set("Accept", "application/json")
 
-	resp, err := c.httpClient.Do(req)
+	loginClient := &http.Client{
+		Jar:     c.httpClient.Jar,
+		Timeout: c.httpClient.Timeout,
+		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+			return http.ErrUseLastResponse
+		},
+	}
+
+	resp, err := loginClient.Do(req)
 	if err != nil {
 		return err
 	}
 	defer resp.Body.Close()
 
-	// Initial login sets the JSESSIONID in the cookie jar
+	if resp.StatusCode == http.StatusFound || resp.StatusCode == http.StatusSeeOther {
+		return errors.New("authentication failed: invalid credentials (302 redirect)")
+	}
 
-	reqT, _ := http.NewRequestWithContext(ctx, "GET", c.baseURL+"/api/token/new", nil)
+	var loginStatus loginResponse
+	bodyBytes, _ := io.ReadAll(resp.Body)
+	if err := json.Unmarshal(bodyBytes, &loginStatus); err == nil {
+		if strings.ToUpper(loginStatus.State) == "FAILED" {
+			return errors.New("authentication failed: invalid credentials")
+		}
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("authentication failed: unexpected status %d", resp.StatusCode)
+	}
+
+	tokenURL := fmt.Sprintf("%s/api/token/new", c.baseURL)
+	reqT, _ := http.NewRequestWithContext(ctx, "GET", tokenURL, nil)
 	respT, err := c.httpClient.Do(reqT)
 	if err != nil {
 		return err
@@ -177,8 +217,8 @@ func (c *Client) Authenticate(ctx context.Context) error {
 		return errors.New("authentication failed: could not retrieve bearer token")
 	}
 
-	body, _ := io.ReadAll(respT.Body)
-	c.token = strings.Trim(string(body), "\"")
+	tokenBody, _ := io.ReadAll(respT.Body)
+	c.token = strings.Trim(string(tokenBody), "\"")
 
 	claims, err := parseJWTClaims(c.token)
 	if err != nil {

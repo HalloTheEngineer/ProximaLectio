@@ -4,6 +4,9 @@ go 1.25
 
 require (
 	github.com/disgoorg/disgo v0.18.16
+	github.com/disgoorg/json v1.2.0
+	github.com/disgoorg/snowflake/v2 v2.0.3
+	github.com/johnfercher/maroto/v2 v2.3.3
 	github.com/lib/pq v1.11.1
 	github.com/tdewolff/canvas v0.0.0-20260129132952-fb83307db4c6
 )
@@ -20,21 +23,22 @@ require (
 	github.com/andybalholm/brotli v1.2.0 // indirect
 	github.com/benoitkugler/textlayout v0.3.1 // indirect
 	github.com/benoitkugler/textprocessing v0.0.4 // indirect
-	github.com/chromedp/cdproto v0.0.0-20250724212937-08a3db8b4327 // indirect
-	github.com/chromedp/chromedp v0.14.2 // indirect
-	github.com/chromedp/sysutil v1.1.0 // indirect
-	github.com/disgoorg/json v1.2.0 // indirect
-	github.com/disgoorg/snowflake/v2 v2.0.3 // indirect
-	github.com/fogleman/gg v1.3.0 // indirect
+	github.com/boombuler/barcode v1.0.1 // indirect
+	github.com/f-amaral/go-async v0.3.0 // indirect
 	github.com/go-fonts/latin-modern v0.3.3 // indirect
-	github.com/go-json-experiment/json v0.0.0-20250725192818-e39067aee2d2 // indirect
 	github.com/go-text/typesetting v0.3.2 // indirect
-	github.com/gobwas/httphead v0.1.0 // indirect
-	github.com/gobwas/pool v0.2.1 // indirect
-	github.com/gobwas/ws v1.4.0 // indirect
 	github.com/golang/freetype v0.0.0-20170609003504-e2365dfdc4a0 // indirect
+	github.com/google/uuid v1.5.0 // indirect
 	github.com/gorilla/websocket v1.5.3 // indirect
+	github.com/hhrutter/lzw v1.0.0 // indirect
+	github.com/hhrutter/tiff v1.0.1 // indirect
+	github.com/johnfercher/go-tree v1.0.5 // indirect
 	github.com/kolesa-team/go-webp v1.0.5 // indirect
+	github.com/mattn/go-runewidth v0.0.15 // indirect
+	github.com/pdfcpu/pdfcpu v0.6.0 // indirect
+	github.com/phpdave11/gofpdf v1.4.3 // indirect
+	github.com/pkg/errors v0.9.1 // indirect
+	github.com/rivo/uniseg v0.4.4 // indirect
 	github.com/sasha-s/go-csync v0.0.0-20240107134140-fcbab37b09ad // indirect
 	github.com/srwiley/rasterx v0.0.0-20220730225603-2ab79fcdd4ef // indirect
 	github.com/srwiley/scanx v0.0.0-20190309010443-e94503791388 // indirect
@@ -49,6 +53,7 @@ require (
 	golang.org/x/sys v0.40.0 // indirect
 	golang.org/x/text v0.33.0 // indirect
 	gonum.org/v1/plot v0.16.0 // indirect
+	gopkg.in/yaml.v2 v2.4.0 // indirect
 	modernc.org/knuth v0.5.5 // indirect
 	modernc.org/token v1.1.0 // indirect
 	star-tex.org/x/tex v0.7.1 // indirect

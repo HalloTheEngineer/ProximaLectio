@@ -60,6 +60,14 @@ func (h *Handler) CommandListener(e *events.ApplicationCommandInteractionCreate)
 
 	case "absences":
 		h.handleAbsences(e)
+	case "exams":
+		h.handleExams(e)
+	case "stats":
+		h.handleStats(e)
+	case "common":
+		h.handleCommon(e)
+	case "excuse":
+		h.handleExcuse(e)
 
 	case "theme":
 		h.handleTheme(e)
@@ -418,7 +426,7 @@ func (h *Handler) handleNotificationStatus(e *events.ApplicationCommandInteracti
 	}
 
 	_ = e.CreateMessage(
-		getSuccessEmbed("Use `/notifications set` to change the configuration.",
+		getSuccessEmbed("Use `/notifications set` to change the configuration.\nUnless you've enabled notifications, no stats about your schedule are collected.",
 			discord.EmbedField{
 				Name:   "Status",
 				Value:  codeBloc(statusEmoji),
@@ -530,7 +538,7 @@ func (h *Handler) handleAbsences(e *events.ApplicationCommandInteractionCreate) 
 		filter = f
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
 	var user *untis.User
@@ -554,8 +562,8 @@ func (h *Handler) handleAbsences(e *events.ApplicationCommandInteractionCreate) 
 
 	embed := discord.NewEmbedBuilder().
 		SetTitle("Your Absences").
-		SetColor(0x5865F2).
-		SetDescription("Here are your recorded absences:")
+		SetColor(9036596).
+		SetDescription("Here are your recorded absences of the current school-year:")
 
 	for i, r := range records {
 		if i >= 10 {
@@ -563,9 +571,9 @@ func (h *Handler) handleAbsences(e *events.ApplicationCommandInteractionCreate) 
 			break
 		}
 
-		status := "Unexcused ✗"
+		str := " ✗"
 		if r.IsExcused {
-			status = "Excused ✔"
+			str = " ✔"
 		}
 
 		dateStr := r.StartDate.Format("02.01.2006")
@@ -578,10 +586,184 @@ func (h *Handler) handleAbsences(e *events.ApplicationCommandInteractionCreate) 
 			reason = "No reason provided"
 		}
 
-		embed.AddField(fmt.Sprintf("%s (%s)", dateStr, status), reason, false)
+		embed.AddField(fmt.Sprintf("%s (%s)", dateStr, r.Status+str), reason, false)
 	}
 
 	_ = e.CreateMessage(discord.NewMessageCreateBuilder().SetEphemeral(true).SetEmbeds(embed.Build()).Build())
+}
+
+func (h *Handler) handleExams(e *events.ApplicationCommandInteractionCreate) {
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+
+	var user *untis.User
+	var err error
+	if user, err = h.ensureLogin(ctx, e); err != nil {
+		return
+	}
+
+	_ = h.DB.Untis.SyncUserExams(ctx, user.ID)
+
+	exams, err := h.DB.Untis.GetUpcomingExams(ctx, user.ID)
+	if err != nil {
+		_ = e.CreateMessage(getErrorEmbed("Failed to retrieve exams.", err))
+		return
+	}
+
+	if len(exams) == 0 {
+		_ = e.CreateMessage(getWarnEmbed("You have no upcoming exams scheduled."))
+		return
+	}
+
+	embed := discord.NewEmbedBuilder().
+		SetTitle("📝 Upcoming Exams").
+		SetColor(0x9B59B6).
+		SetDescription("Here are your upcoming tests and exams:")
+
+	for _, ex := range exams {
+		title := fmt.Sprintf("**%s** (%s)", ex.Subject, ex.Date.Format("02.01.2006"))
+		details := fmt.Sprintf("⏰ %s - %s\n🏷️ %s", ex.StartTime, ex.EndTime, ex.Name)
+		if ex.Name == "" {
+			details = fmt.Sprintf("⏰ %s - %s", ex.StartTime, ex.EndTime)
+		}
+		embed.AddField(title, details, false)
+	}
+
+	_ = e.CreateMessage(discord.NewMessageCreateBuilder().SetEmbeds(embed.Build()).Build())
+}
+
+func (h *Handler) handleStats(e *events.ApplicationCommandInteractionCreate) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	var user *untis.User
+	var err error
+	if user, err = h.ensureLogin(ctx, e); err != nil {
+		return
+	}
+
+	stats, err := h.DB.Untis.GetUserStats(ctx, user.ID)
+	if err != nil {
+		_ = e.CreateMessage(getErrorEmbed("Failed to calculate your statistics.", err))
+		return
+	}
+
+	cancelRate := 0.0
+	if stats.TotalLessons > 0 {
+		cancelRate = (float64(stats.CancelledCount) / float64(stats.TotalLessons)) * 100
+	}
+
+	embed := discord.NewEmbedBuilder().
+		SetTitle("Your Insights").
+		SetDescription(fmt.Sprintf("Statistics for **%s** based on synchronized data.", user.Username)).
+		SetColor(0x2ECC71).
+		SetThumbnail(e.User().EffectiveAvatarURL())
+
+	// Timetable Section
+	embed.AddField("Timetable Overview",
+		fmt.Sprintf("• Total Lessons Tracked: `%d`\n• Substitutions: `%d`\n• Cancelled: `%d` (`%.1f%%`)",
+			stats.TotalLessons, stats.SubstitutionCount, stats.CancelledCount, cancelRate),
+		false)
+
+	// Logistics Section
+	embed.AddField("Logistics",
+		fmt.Sprintf("• Most Frequented Room: **%s**\n• Upcoming Exams: `%d`",
+			stats.MostVisitedRoom, stats.UpcomingExams),
+		true)
+
+	// Absence Section
+	statusEmoji := "✅"
+	if stats.UnexcusedAbsences > 0 {
+		statusEmoji = "⚠️"
+	}
+	embed.AddField(fmt.Sprintf("%s Absences", statusEmoji),
+		fmt.Sprintf("• Total: `%d`\n• Unexcused: `%d`",
+			stats.TotalAbsences, stats.UnexcusedAbsences),
+		true)
+
+	footer := "Keep up the good work!"
+	if cancelRate > 15 {
+		footer = "That's a lot of free time!"
+	} else if stats.UnexcusedAbsences > 5 {
+		footer = "Don't forget to hand in your excuses! <a:"
+	}
+	embed.SetFooter(footer, "")
+
+	_ = e.CreateMessage(discord.NewMessageCreateBuilder().SetEmbeds(embed.Build()).Build())
+}
+
+func (h *Handler) handleCommon(e *events.ApplicationCommandInteractionCreate) {
+	data := e.SlashCommandInteractionData()
+
+	if e.GuildID() == nil {
+		_ = e.CreateMessage(getWarnEmbed("This command can only be used in a guild."))
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	_ = h.DB.SyncGuildMembership(ctx, e.User().ID.String(), e.GuildID().String())
+
+	targetTime := time.Now()
+	isAtRequest := false
+
+	if data.SubCommandName != nil && *data.SubCommandName == "at" {
+		isAtRequest = true
+		timeInput, _ := data.OptString("time")
+
+		parsed, err := time.Parse("15:04", timeInput)
+		if err != nil {
+			_ = e.CreateMessage(getWarnEmbed("Invalid time format. Please use `HH:MM` (e.g. 13:30)."))
+			return
+		}
+
+		now := time.Now()
+		targetTime = time.Date(now.Year(), now.Month(), now.Day(), parsed.Hour(), parsed.Minute(), 0, 0, now.Location())
+	}
+
+	statuses, err := h.DB.Untis.GetGuildMemberStatusesAt(ctx, e.GuildID().String(), targetTime)
+	if err != nil {
+		_ = e.CreateMessage(getErrorEmbed("Failed to retrieve server schedule data.", err))
+		return
+	}
+
+	if len(statuses) == 0 {
+		_ = e.CreateMessage(getWarnEmbed("No registered users found in this server."))
+		return
+	}
+
+	embed := discord.NewEmbedBuilder().
+		SetTitle("Common Schedule of the Guild").
+		SetColor(0x5865F2).
+		SetTimestamp(targetTime)
+
+	var freeUsers []string
+	var busyUsers []string
+
+	for _, s := range statuses {
+		mention := fmt.Sprintf("<@%s>", s.UserID)
+		if s.IsFree {
+			freeUsers = append(freeUsers, mention)
+		} else {
+			busyUsers = append(busyUsers, fmt.Sprintf("%s: **%s** in %s (%s)", mention, s.Subject, s.Room, strings.ToLower(s.Status)))
+		}
+	}
+
+	timeLabel := "Currently"
+	if isAtRequest {
+		timeLabel = fmt.Sprintf("At %s", targetTime.Format("15:04"))
+	}
+
+	if len(freeUsers) > 0 {
+		embed.AddField(fmt.Sprintf("🟢 %s Free", timeLabel), strings.Join(freeUsers, ", "), false)
+	}
+
+	if len(busyUsers) > 0 {
+		embed.AddField(fmt.Sprintf("🔴 %s in Lessons", timeLabel), strings.Join(busyUsers, "\n"), false)
+	}
+
+	_ = e.CreateMessage(discord.NewMessageCreateBuilder().SetEmbeds(embed.Build()).Build())
 }
 
 func (h *Handler) handleTheme(e *events.ApplicationCommandInteractionCreate) {
@@ -615,6 +797,50 @@ func (h *Handler) handleTheme(e *events.ApplicationCommandInteractionCreate) {
 	}
 
 	_ = e.CreateMessage(getSuccessEmbed(fmt.Sprintf("Theme updated successfully to `%s`!", strings.ToUpper(themeStr))))
+}
+
+func (h *Handler) handleExcuse(e *events.ApplicationCommandInteractionCreate) {
+	data := e.SlashCommandInteractionData()
+
+	absenceID, ok := data.OptInt("id")
+	if !ok {
+		_ = e.CreateMessage(getWarnEmbed("Please provide a valid Absence ID. Start typing in the 'id' field to see your recent absences."))
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	if _, err := h.ensureLogin(ctx, e); err != nil {
+		return
+	}
+
+	_ = e.DeferCreateMessage(true)
+
+	b := *h.Bot
+	if b == nil {
+		return
+	}
+
+	pdfReader, err := h.DB.Untis.GenerateExcusePDF(ctx, e.User().ID.String(), absenceID)
+	if err != nil {
+		_, _ = b.Rest().UpdateInteractionResponse(e.ApplicationID(), e.Token(), getErrorUpdateEmbed("Failed to generate the excuse document. Make sure you selected a valid absence.", err))
+		return
+	}
+
+	fileName := fmt.Sprintf("Entschuldigung_%d.pdf", absenceID)
+	attachment := discord.NewFile(fileName, "", pdfReader)
+
+	_, err = b.Rest().UpdateInteractionResponse(e.ApplicationID(), e.Token(),
+		discord.NewMessageUpdateBuilder().
+			SetContent("✅ Your formal excuse letter has been generated. You can download and print it below.").
+			AddFiles(attachment).
+			Build(),
+	)
+
+	if err != nil {
+		fmt.Printf("Error sending PDF file: %v\n", err)
+	}
 }
 
 func (h *Handler) ensureLogin(ctx context.Context, e *events.ApplicationCommandInteractionCreate) (*untis.User, error) {

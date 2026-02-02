@@ -13,6 +13,7 @@ services:
     environment:
       # Discord Configuration
       - VERBOSE=${VERBOSE:-1}
+      - NO_COMMAND_UPDATE=${NO_COMMAND_UPDATE:-0}
       - DISCORD_TOKEN=${DISCORD_TOKEN}
       - TZ=Europe/Berlin
 

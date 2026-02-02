@@ -3,6 +3,7 @@ package events
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"log/slog"
 	"strings"
 	"time"
@@ -33,6 +34,13 @@ func (h *Handler) AutocompleteListener(e *events.AutocompleteInteractionCreate) 
 				slog.Error(err.Error())
 			}
 		}()
+	case "excuse":
+		go func() {
+			if err := e.AutocompleteResult(h.buildExcuseAutocomplete(e)); err != nil {
+				slog.Error(err.Error())
+			}
+		}()
+
 	}
 
 }
@@ -78,7 +86,6 @@ func (h *Handler) buildSchoolAutocomplete(ctx context.Context, e *events.Autocom
 	}
 	return
 }
-
 func (h *Handler) buildThemeAutocomplete(e *events.AutocompleteInteractionCreate) (choices []discord.AutocompleteChoice) {
 	var query string
 	focused := e.AutocompleteInteraction.Data.Focused()
@@ -136,6 +143,39 @@ func (h *Handler) buildRoomAutocomplete(e *events.AutocompleteInteractionCreate)
 
 	for i, sub := range subjects {
 		choices[i] = discord.AutocompleteChoiceString{Name: sub, Value: sub}
+	}
+
+	return choices
+}
+func (h *Handler) buildExcuseAutocomplete(e *events.AutocompleteInteractionCreate) []discord.AutocompleteChoice {
+	data := e.Data
+	currentInput := data.String("id")
+
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+
+	absences, err := h.DB.Untis.SearchAbsencesForAutocomplete(ctx, e.User().ID.String(), currentInput)
+	if err != nil {
+		return []discord.AutocompleteChoice{}
+	}
+
+	choices := make([]discord.AutocompleteChoice, 0, len(absences))
+	for _, a := range absences {
+		dateStr := a.StartDate.Format("02.01.2006")
+		reason := a.Reason
+		if reason == "" {
+			reason = "No reason specified"
+		}
+
+		label := fmt.Sprintf("%s — %s", dateStr, reason)
+		if len(label) > 97 {
+			label = label[:97] + "..."
+		}
+
+		choices = append(choices, discord.AutocompleteChoiceInt{
+			Name:  label,
+			Value: a.UntisID,
+		})
 	}
 
 	return choices

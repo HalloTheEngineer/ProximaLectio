@@ -57,3 +57,12 @@ func (d *DB) RegisterGuild(ctx context.Context, id, name string) error {
 	_, err := d.db.ExecContext(ctx, query, id, name)
 	return err
 }
+func (d *DB) SyncGuildMembership(ctx context.Context, userID, guildID string) error {
+	query := `
+		INSERT INTO guild_members (user_id, guild_id)
+		SELECT id, $2 FROM users WHERE id = $1
+		ON CONFLICT (user_id, guild_id) DO NOTHING`
+
+	_, err := d.db.ExecContext(ctx, query, userID, guildID)
+	return err
+}

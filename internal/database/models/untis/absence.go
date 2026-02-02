@@ -7,5 +7,6 @@ type AbsenceRecord struct {
 	StartDate time.Time
 	EndDate   time.Time
 	Reason    string
+	Status    string
 	IsExcused bool
 }

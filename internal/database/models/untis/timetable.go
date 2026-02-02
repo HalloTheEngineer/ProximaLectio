@@ -28,3 +28,12 @@ type LessonSlot struct {
 	Position6 []Position `json:"position6"`
 	Position7 []Position `json:"position7"`
 }
+
+type UserScheduleStatus struct {
+	UserID   string
+	Username string
+	Subject  string // Empty if free
+	Room     string
+	Status   string // REGULAR, CANCELLED, etc.
+	IsFree   bool
+}

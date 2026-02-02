@@ -41,6 +41,16 @@ func (h *Handler) RegisterNotificationHooks() {
 		case "ABSENCE_REASON":
 			title = "📝 Absence Reason Updated"
 			description = fmt.Sprintf("The reason for your absence on **%s** was updated: `%s` → **`%s`**.", date, old, new)
+
+		case "EXAM_NEW":
+			title = "📝 New Exam Scheduled"
+			description = fmt.Sprintf("A new exam/test for **%s** has been detected in your timetable!\n\n**Date:** %s\n**Type:** %s", subject, date, new)
+			color = 0x9B59B6
+
+		case "AUTH_FAILURE":
+			title = "🔒 Authentication Failed"
+			description = "The bot could no longer log into your WebUntis account. Did you change your password? Please use `/login` again to restore service."
+			color = 0xED4245 // Red
 		}
 
 		embed := discord.NewEmbedBuilder().

@@ -262,27 +262,6 @@ var (
 				},
 			},
 		}, // NOTIFICATIONS
-		/*dc.SlashCommandCreate{
-			Name:        "alert-time",
-			Description: "Sets a time for a daily \"Morning Summary\" of the schedule.",
-			DescriptionLocalizations: map[dc.Locale]string{
-				dc.LocaleGerman: "Setzt die Zeit für eine Zusammenfassung des Stundenplans.",
-			},
-			Contexts: []dc.InteractionContextType{dc.InteractionContextTypeBotDM, dc.InteractionContextTypeGuild},
-			Options: []dc.ApplicationCommandOption{
-				dc.ApplicationCommandOptionString{
-					Name: "time",
-					NameLocalizations: map[dc.Locale]string{
-						dc.LocaleGerman: "zeitpunkt",
-					},
-					Description: "Format: HH:MM",
-					DescriptionLocalizations: map[dc.Locale]string{
-						dc.LocaleGerman: "Format: SS:MM",
-					},
-					Required: true,
-				},
-			},
-		},*/
 
 		// ABSENCES & INFO
 		dc.SlashCommandCreate{
@@ -330,7 +309,49 @@ var (
 				dc.LocaleGerman: "Zeigt anstehende Prüfungen.",
 			},
 			Contexts: []dc.InteractionContextType{dc.InteractionContextTypeBotDM, dc.InteractionContextTypeGuild},
-		},
+		}, // EXAMS
+		dc.SlashCommandCreate{
+			Name:        "stats",
+			Description: "Shows your academic statistics and yearly progress.",
+			DescriptionLocalizations: map[dc.Locale]string{
+				dc.LocaleGerman: "Zeigt deine akademischen Statistiken und den Jahresfortschritt.",
+			},
+			Contexts: []dc.InteractionContextType{dc.InteractionContextTypeBotDM, dc.InteractionContextTypeGuild},
+		}, // STATS
+		dc.SlashCommandCreate{
+			Name:        "common",
+			Description: "Find shared schedules among server members.",
+			Contexts:    []dc.InteractionContextType{dc.InteractionContextTypeGuild},
+			Options: []dc.ApplicationCommandOption{
+				dc.ApplicationCommandOptionSubCommand{
+					Name:        "free",
+					Description: "Show who is currently free.",
+				},
+				dc.ApplicationCommandOptionSubCommand{
+					Name:        "at",
+					Description: "Check everyone's status at a specific time.",
+					Options: []dc.ApplicationCommandOption{
+						dc.ApplicationCommandOptionString{
+							Name:        "time",
+							Description: "The time to check (HH:MM).",
+							Required:    true,
+						},
+					},
+				},
+			},
+		}, // COMMON
+		dc.SlashCommandCreate{
+			Name:        "excuse",
+			Description: "Generates a formal PDF excuse for a specific absence.",
+			Options: []dc.ApplicationCommandOption{
+				dc.ApplicationCommandOptionInt{
+					Name:         "id",
+					Description:  "Select the absence from the list",
+					Required:     true,
+					Autocomplete: true,
+				},
+			},
+		}, // EXCUSE
 
 		// CUSTOMIZATION
 		dc.SlashCommandCreate{
@@ -351,6 +372,6 @@ var (
 					Autocomplete: true,
 				},
 			},
-		},
+		}, // THEME
 	}
 )

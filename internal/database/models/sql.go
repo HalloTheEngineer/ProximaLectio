@@ -31,6 +31,14 @@ func GetSQLCreationQueries() []string {
 			);
 		`,
 		`
+			CREATE TABLE IF NOT EXISTS guild_members (
+				user_id VARCHAR(64) REFERENCES users(id) ON DELETE CASCADE,
+				guild_id VARCHAR(64) REFERENCES guilds(id) ON DELETE CASCADE,
+				joined_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+				PRIMARY KEY (user_id, guild_id)
+			);
+		`,
+		`
 			CREATE TABLE IF NOT EXISTS guilds (
 				id VARCHAR(64) PRIMARY KEY, 
 				name VARCHAR(255) NOT NULL, 
@@ -69,7 +77,22 @@ func GetSQLCreationQueries() []string {
 				start_time INTEGER,
 				end_time INTEGER,
 				reason TEXT,
+				status VARCHAR(64),
 				is_excused BOOLEAN DEFAULT FALSE,
+				UNIQUE(user_id, untis_id)
+			);
+		`,
+		`
+			CREATE TABLE IF NOT EXISTS exams (
+				id SERIAL PRIMARY KEY,
+				untis_id INTEGER NOT NULL,
+				user_id VARCHAR(64) REFERENCES users(id) ON DELETE CASCADE,
+				exam_date DATE NOT NULL,
+				start_time TIME,
+				end_time TIME,
+				subject VARCHAR(255),
+				name TEXT,
+				last_updated TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
 				UNIQUE(user_id, untis_id)
 			);
 		`,

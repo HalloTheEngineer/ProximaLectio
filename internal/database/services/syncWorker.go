@@ -36,6 +36,9 @@ func runSyncCycle(ctx context.Context, s *UntisService) {
 	}
 
 	for _, user := range users {
+		if !user.NotificationsEnabled {
+			continue
+		}
 		userCtx, cancel := context.WithTimeout(ctx, 45*time.Second)
 
 		slog.Debug("Syncing user", "username", user.Username, "id", user.ID)
