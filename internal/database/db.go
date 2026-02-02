@@ -48,13 +48,7 @@ func Connect(cfg *config.Config) *DB {
 }
 
 func (d *DB) RegisterGuild(ctx context.Context, id, name string) error {
-	query := `
-		INSERT INTO guilds (id, name) 
-		VALUES ($1, $2) 
-		ON CONFLICT (id) DO UPDATE SET 
-			name = EXCLUDED.name`
-
-	_, err := d.db.ExecContext(ctx, query, id, name)
+	_, err := d.db.ExecContext(ctx, `INSERT INTO guilds (id, name) VALUES ($1, $2) ON CONFLICT (id) DO UPDATE SET name = EXCLUDED.name`, id, name)
 	return err
 }
 func (d *DB) SyncGuildMembership(ctx context.Context, userID, guildID string) error {

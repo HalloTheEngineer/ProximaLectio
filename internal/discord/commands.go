@@ -71,9 +71,9 @@ var (
 		// TIMETABLE & STATUS
 		dc.SlashCommandCreate{
 			Name:        "pull",
-			Description: "Pulls the current schedule from the API, storing it in the db. This is the manual way of doing it.",
+			Description: "Pulls current data from the API, storing it in the db. This is the manual way of doing it.",
 			DescriptionLocalizations: map[dc.Locale]string{
-				dc.LocaleGerman: "Speichert den aktuellen Stundenplan in der Datenbank ab, funktioniert sonst automatisch.",
+				dc.LocaleGerman: "Speichert aktuelle Infos in der Datenbank ab, funktioniert sonst automatisch.",
 			},
 			Contexts: []dc.InteractionContextType{dc.InteractionContextTypeBotDM, dc.InteractionContextTypeGuild},
 		}, // PULL
@@ -349,6 +349,10 @@ var (
 					Description:  "Select the absence from the list",
 					Required:     true,
 					Autocomplete: true,
+				},
+				dc.ApplicationCommandOptionString{
+					Name:        "guardian",
+					Description: "If under 18 years old, make a guardian sign.",
 				},
 			},
 		}, // EXCUSE

@@ -136,6 +136,33 @@ type Exam struct {
 	ExamType  string `json:"examType"`
 }
 
+type Homework struct {
+	ID        int    `json:"id"`
+	LessonID  int    `json:"lessonId"`
+	Date      int    `json:"date"`
+	DueDate   int    `json:"dueDate"`
+	Text      string `json:"text"`
+	Completed bool   `json:"completed"`
+}
+
+type HomeworkLesson struct {
+	ID      int    `json:"id"`
+	Subject string `json:"subject"`
+}
+
+type HomeworkTeacher struct {
+	ID   int    `json:"id"`
+	Name string `json:"name"`
+}
+
+type HomeworkResponse struct {
+	Data struct {
+		Homeworks []Homework        `json:"homeworks"`
+		Lessons   []HomeworkLesson  `json:"lessons"`
+		Teachers  []HomeworkTeacher `json:"teachers"`
+	} `json:"data"`
+}
+
 type loginResponse struct {
 	State    string `json:"state"`
 	SwitchUI bool   `json:"switchUI"`
@@ -271,6 +298,17 @@ func (c *Client) GetMyTimetable(ctx context.Context, start, end time.Time) (*Tim
 	var data TimetableEntry
 	err := c.doREST(ctx, "GET", path, nil, &data)
 	return &data, err
+}
+
+func (c *Client) GetHomeworks(ctx context.Context, start, end time.Time) (*HomeworkResponse, error) {
+	sStr := start.Format("20060102")
+	eStr := end.Format("20060102")
+
+	path := fmt.Sprintf("/api/homeworks/lessons?startDate=%s&endDate=%s", sStr, eStr)
+
+	var resp HomeworkResponse
+	err := c.doREST(ctx, "GET", path, nil, &resp)
+	return &resp, err
 }
 
 func (c *Client) doREST(ctx context.Context, method, path string, body io.Reader, v interface{}) error {

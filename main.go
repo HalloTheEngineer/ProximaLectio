@@ -26,7 +26,7 @@ func main() {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	services.StartSyncWorker(ctx, db.Untis, 2*time.Hour)
+	services.StartSyncWorker(ctx, db.Untis, "0 6-18 * * *", "0 19 * * *")
 
 	go func() {
 		client := discord.Launch(db, cfg)

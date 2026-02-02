@@ -6,6 +6,7 @@ require (
 	github.com/disgoorg/disgo v0.18.16
 	github.com/disgoorg/json v1.2.0
 	github.com/disgoorg/snowflake/v2 v2.0.3
+	github.com/go-co-op/gocron v1.37.0
 	github.com/johnfercher/maroto/v2 v2.3.3
 	github.com/lib/pq v1.11.1
 	github.com/tdewolff/canvas v0.0.0-20260129132952-fb83307db4c6
@@ -39,6 +40,7 @@ require (
 	github.com/phpdave11/gofpdf v1.4.3 // indirect
 	github.com/pkg/errors v0.9.1 // indirect
 	github.com/rivo/uniseg v0.4.4 // indirect
+	github.com/robfig/cron/v3 v3.0.1 // indirect
 	github.com/sasha-s/go-csync v0.0.0-20240107134140-fcbab37b09ad // indirect
 	github.com/srwiley/rasterx v0.0.0-20220730225603-2ab79fcdd4ef // indirect
 	github.com/srwiley/scanx v0.0.0-20190309010443-e94503791388 // indirect
@@ -47,6 +49,7 @@ require (
 	github.com/tdewolff/parse/v2 v2.8.5 // indirect
 	github.com/wcharczuk/go-chart/v2 v2.1.2 // indirect
 	github.com/yuin/goldmark v1.7.16 // indirect
+	go.uber.org/atomic v1.9.0 // indirect
 	golang.org/x/crypto v0.47.0 // indirect
 	golang.org/x/image v0.35.0 // indirect
 	golang.org/x/net v0.49.0 // indirect

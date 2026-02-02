@@ -4,61 +4,73 @@ import (
 	"context"
 	"log/slog"
 	"time"
+
+	"github.com/go-co-op/gocron"
 )
 
-func StartSyncWorker(ctx context.Context, s *UntisService, interval time.Duration) {
+func StartSyncWorker(ctx context.Context, s *UntisService, syncSpec string, homeworkSpec string) {
+	scheduler := gocron.NewScheduler(time.Local)
+
+	_, err := scheduler.Cron(syncSpec).Do(func() {
+		slog.Info("Starting scheduled general sync cycle")
+		runGeneralSync(ctx, s)
+	})
+	if err != nil {
+		slog.Error("Failed to schedule general sync job", "error", err)
+	}
+
+	_, err = scheduler.Cron(homeworkSpec).Do(func() {
+		slog.Info("Starting scheduled daily homework alert check")
+		runHomeworkCheck(ctx, s)
+	})
+	if err != nil {
+		slog.Error("Failed to schedule homework alert job", "error", err)
+	}
+
+	scheduler.StartAsync()
+	slog.Info("Gocron sync worker started", "sync_schedule", syncSpec, "homework_schedule", homeworkSpec)
+
 	go func() {
-		ticker := time.NewTicker(interval)
-		defer ticker.Stop()
-
-		slog.Info("(✓) Starting periodic timetable sync worker", "interval", interval)
-
-		for {
-			select {
-			case <-ctx.Done():
-				slog.Info("(✓) Stopping sync worker...")
-				return
-			case <-ticker.C:
-				runSyncCycle(ctx, s)
-			}
-		}
+		<-ctx.Done()
+		slog.Info("Stopping sync worker...")
+		scheduler.Stop()
 	}()
 }
 
-func runSyncCycle(ctx context.Context, s *UntisService) {
-	slog.Info("(✓) Starting global sync cycle...")
-	startCycle := time.Now()
-
+func runGeneralSync(ctx context.Context, s *UntisService) {
 	users, err := s.GetAllUsers(ctx)
 	if err != nil {
-		slog.Error("Failed to fetch users for sync cycle", "error", err)
+		slog.Error("Could not fetch users for sync", "error", err)
 		return
 	}
 
 	for _, user := range users {
-		if !user.NotificationsEnabled {
+		userCtx, cancel := context.WithTimeout(ctx, 60*time.Second)
+
+		if !s.Sync(userCtx, user.ID) {
+			cancel()
 			continue
-		}
-		userCtx, cancel := context.WithTimeout(ctx, 45*time.Second)
-
-		slog.Debug("Syncing user", "username", user.Username, "id", user.ID)
-
-		start := time.Now().AddDate(0, 0, -2)
-		end := time.Now().AddDate(0, 0, 7)
-
-		err := s.SyncUserTimetable(userCtx, user.ID, start, end)
-		if err != nil {
-			slog.Warn("Failed to sync user timetable", "user_id", user.ID, "error", err)
-		}
-
-		if err := s.SyncUserAbsences(userCtx, user.ID); err != nil {
-			slog.Warn("Absence sync failed", "user", user.ID, "error", err)
 		}
 
 		cancel()
+		time.Sleep(500 * time.Millisecond)
+	}
+}
 
-		time.Sleep(1 * time.Second)
+func runHomeworkCheck(ctx context.Context, s *UntisService) {
+	users, err := s.GetAllUsers(ctx)
+	if err != nil {
+		return
 	}
 
-	slog.Info("(✓) Global sync cycle completed", "duration", time.Since(startCycle), "user_count", len(users))
+	for _, user := range users {
+		userCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+
+		if err := s.CheckUserHomeworkAlerts(userCtx, user.ID); err != nil {
+			slog.Warn("Daily homework check failed", "user", user.ID, "error", err)
+		}
+
+		cancel()
+		time.Sleep(500 * time.Millisecond)
+	}
 }
