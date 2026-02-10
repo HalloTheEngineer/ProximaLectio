@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"fmt"
 	"io"
+	"strings"
 
 	"github.com/johnfercher/maroto/v2"
 	"github.com/johnfercher/maroto/v2/pkg/components/col"
@@ -13,6 +14,7 @@ import (
 	"github.com/johnfercher/maroto/v2/pkg/consts/align"
 	"github.com/johnfercher/maroto/v2/pkg/consts/fontstyle"
 	"github.com/johnfercher/maroto/v2/pkg/consts/orientation"
+	"github.com/johnfercher/maroto/v2/pkg/core"
 	"github.com/johnfercher/maroto/v2/pkg/props"
 )
 
@@ -27,50 +29,48 @@ func NewPDFRenderer() *PDFRenderer {
 // ExcuseData represents the information required to populate an excuse letter template.
 type ExcuseData struct {
 	StudentName    string
-	StudentID      int
+	StudentID      int64
 	DateRange      string
+	StartTime      string
+	EndTime        string
 	Reason         string
 	City           string
 	SubmissionDate string
 	ReferenceID    string
+	Guardian       string
 }
 
-// RenderExcuse performs the Maroto v2 PDF generation with improved formatting and fixed struct fields.
 func (r *PDFRenderer) RenderExcuse(data ExcuseData) (io.Reader, error) {
 	m := maroto.New()
 
 	m.AddRows(
-		// --- SENDER INFO ---
-		row.New(12).Add(
+		row.New(8).Add(
 			col.New(12).Add(
-				text.New(data.StudentName, props.Text{Size: 12, Style: fontstyle.Bold, Align: align.Left}),
+				text.New(data.StudentName, props.Text{Size: 11, Style: fontstyle.Bold, Align: align.Left}),
 			),
 		),
-		row.New(10).Add(
+		row.New(6).Add(
 			col.New(12).Add(
 				text.New(fmt.Sprintf("Student ID: %d", data.StudentID), props.Text{Size: 9, Align: align.Left}),
 			),
 		),
 
-		// Spacing before Date
-		row.New(20),
+		row.New(10),
 
-		// --- DATE LINE ---
-		row.New(15).Add(
+		row.New(8).Add(
 			col.New(12).Add(
 				text.New(fmt.Sprintf("%s, den %s", data.City, data.SubmissionDate), props.Text{Size: 10, Align: align.Right}),
 			),
 		),
 
-		row.New(25),
+		row.New(15),
 
-		// --- SUBJECT ---
-		row.New(14).Add(
+		row.New(10).Add(
 			col.New(12).Add(
-				text.New("Entschuldigung für das Fernbleiben vom Unterricht", props.Text{Size: 14, Style: fontstyle.Bold}),
+				text.New("Entschuldigung für das Fernbleiben vom Unterricht", props.Text{Size: 13, Style: fontstyle.Bold}),
 			),
 		),
-		row.New(5).Add(
+		row.New(4).Add(
 			col.New(12).Add(
 				line.New(props.Line{
 					Thickness:     0.5,
@@ -81,79 +81,84 @@ func (r *PDFRenderer) RenderExcuse(data ExcuseData) (io.Reader, error) {
 			),
 		),
 
-		row.New(20),
+		row.New(10),
 
-		// --- SALUTATION ---
-		row.New(15).Add(
+		row.New(8).Add(
 			col.New(12).Add(
-				text.New("Sehr geehrte Damen und Herren,", props.Text{Size: 11}),
+				text.New("Sehr geehrte Damen und Herren,", props.Text{Size: 10}),
 			),
 		),
 
-		// --- MAIN BODY ---
-		row.New(12).Add(
-			col.New(12).Add(
-				text.New(fmt.Sprintf("hiermit möchte ich mein Fernbleiben vom Unterricht im Zeitraum vom %s entschuldigen.", data.DateRange), props.Text{Size: 11}),
-			),
-		),
+		row.New(6),
 
-		row.New(15),
-
-		// --- REASON ---
 		row.New(10).Add(
 			col.New(12).Add(
-				text.New("Der Grund für meine Abwesenheit war:", props.Text{Size: 11}),
-			),
-		),
-		row.New(12).Add(
-			col.New(12).Add(
-				text.New(fmt.Sprintf("\"%s\"", data.Reason), props.Text{Size: 11, Style: fontstyle.Italic}),
+				text.New(fmt.Sprintf("hiermit möchte ich mein Fernbleiben vom Unterricht im Zeitraum vom %s (%s - %s Uhr) entschuldigen.", data.DateRange, data.StartTime, data.EndTime), props.Text{Size: 10}),
 			),
 		),
 
-		row.New(15),
+		row.New(6),
 
-		// --- CLOSING REQUEST ---
-		row.New(12).Add(
+		row.New(6).Add(
 			col.New(12).Add(
-				text.New("Ich bitte Sie, mein Fehlen als entschuldigt zu markieren.", props.Text{Size: 11}),
+				text.New("Der Grund für meine Abwesenheit war:", props.Text{Size: 10}),
+			),
+		),
+		row.New(8).Add(
+			col.New(12).Add(
+				text.New(fmt.Sprintf("\"%s\"", data.Reason), props.Text{Size: 10, Style: fontstyle.Italic}),
+			),
+		),
+
+		row.New(6),
+
+		row.New(8).Add(
+			col.New(12).Add(
+				text.New("Ich bitte Sie, mein Fehlen als entschuldigt zu markieren.", props.Text{Size: 10}),
+			),
+		),
+
+		row.New(10),
+
+		row.New(8).Add(
+			col.New(12).Add(
+				func() core.Component {
+					closing := "Mit freundlichen Grüßen,"
+					if data.Guardian != "" {
+						closing = fmt.Sprintf("Mit freundlichen Grüßen, %s", data.StudentName)
+					}
+					return text.New(closing, props.Text{Size: 10})
+				}(),
 			),
 		),
 
 		row.New(20),
 
-		// --- SIGNATURE BLOCK ---
-		row.New(12).Add(
-			col.New(12).Add(
-				text.New("Mit freundlichen Grüßen,", props.Text{Size: 11}),
-			),
-		),
-
-		// Large space for physical signature
-		row.New(35),
-
-		// Signature Line and Name (using specific line props)
-		row.New(5).Add(
-			col.New(12).Add(
+		row.New(2).Add(
+			col.New(5).Add(
 				line.New(props.Line{
-					Thickness:     0.5,
+					Thickness:     0.3,
 					Orientation:   orientation.Horizontal,
-					SizePercent:   40, // Only span 40% of the width
-					OffsetPercent: 0,  // Start from the left
+					SizePercent:   100,
+					OffsetPercent: 0,
 				}),
 			),
 		),
-		row.New(10).Add(
-			col.New(12).Add(
-				text.New(data.StudentName, props.Text{Size: 11, Style: fontstyle.Bold}),
+		row.New(8).Add(
+			col.New(5).Add(
+				func() core.Component {
+					name := data.StudentName
+					if data.Guardian != "" {
+						name = data.Guardian + " (Erziehungsberechtigte/r)"
+					}
+					return text.New(name, props.Text{Size: 10, Style: fontstyle.Bold})
+				}(),
 			),
 		),
 
-		// Large spacer to push the metadata footer to the very bottom
-		row.New(80),
+		row.New(30),
 
-		// --- FOOTER / METADATA ---
-		row.New(5).Add(
+		row.New(4).Add(
 			col.New(12).Add(
 				line.New(props.Line{
 					Thickness:     0.2,
@@ -163,14 +168,14 @@ func (r *PDFRenderer) RenderExcuse(data ExcuseData) (io.Reader, error) {
 				}),
 			),
 		),
-		row.New(8).Add(
+		row.New(6).Add(
 			col.New(12).Add(
-				text.New("Dieses Dokument wurde automatisch erstellt von ProximaLectio (WebUntis Discord Bot).", props.Text{Size: 7}),
+				text.New("Dieses Dokument wurde automatisch erstellt von ProximaLectio (WebUntis Discord Bot).", props.Text{Size: 6}),
 			),
 		),
-		row.New(8).Add(
+		row.New(6).Add(
 			col.New(12).Add(
-				text.New(fmt.Sprintf("Referenz-ID: %s", data.ReferenceID), props.Text{Size: 7}),
+				text.New(fmt.Sprintf("Referenz-ID: %s", data.ReferenceID), props.Text{Size: 6}),
 			),
 		),
 	)
@@ -181,4 +186,25 @@ func (r *PDFRenderer) RenderExcuse(data ExcuseData) (io.Reader, error) {
 	}
 
 	return bytes.NewReader(doc.GetBytes()), nil
+}
+
+func formatUntisName(name string) string {
+	if strings.Contains(name, ",") {
+		parts := strings.Split(name, ",")
+		if len(parts) == 2 {
+			return strings.TrimSpace(parts[1]) + " " + strings.TrimSpace(parts[0])
+		}
+	}
+
+	parts := strings.Fields(name)
+	if len(parts) == 2 {
+		if isLikelySurname(parts[0]) {
+			return parts[1] + " " + parts[0]
+		}
+	}
+	return name
+}
+
+func isLikelySurname(part string) bool {
+	return strings.ToUpper(part) == part && len(part) > 1
 }

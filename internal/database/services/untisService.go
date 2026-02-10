@@ -12,6 +12,7 @@ import (
 	"os"
 	"proximaLectio/internal/database/models/untis"
 	api "proximaLectio/internal/untis"
+	"proximaLectio/internal/utils"
 	"strconv"
 	"strings"
 	"time"
@@ -38,6 +39,7 @@ func NewUntisService(db *sql.DB) *UntisService {
 func (s *UntisService) RegisterNotificationHook(handler NotificationHandler) {
 	s.onStatusChangeHooks = append(s.onStatusChangeHooks, handler)
 }
+
 func (s *UntisService) notifyHooks(ctx context.Context, userID string, target untis.NotificationTarget, subject, date, cType, old, new string) {
 	for _, hook := range s.onStatusChangeHooks {
 		hook(ctx, userID, target, subject, date, cType, old, new)
@@ -257,6 +259,64 @@ func (s *UntisService) ToggleNotifications(ctx context.Context, id string, enabl
 	return err
 }
 
+func (s *UntisService) CheckUserHomeworkAlerts(ctx context.Context, discordUserID string) error {
+	user, err := s.GetUser(ctx, discordUserID)
+	if err != nil {
+		return err
+	}
+	school, err := s.GetSchool(ctx, strconv.Itoa(int(user.UntisSchoolID)))
+	if err != nil {
+		return err
+	}
+
+	client, _ := api.NewClient(school.LoginName, user.UntisUser, user.UntisPassword, fmt.Sprintf("https://%s/WebUntis", school.Server))
+	if err := client.Authenticate(ctx); err != nil {
+		return err
+	}
+
+	now := time.Now()
+	tomorrow := now.AddDate(0, 0, 1)
+	tomorrowInt, _ := strconv.Atoi(tomorrow.Format("20060102"))
+
+	resp, err := client.GetHomeworks(ctx, now, now.AddDate(0, 0, 14))
+	if err != nil {
+		return err
+	}
+
+	subjects := make(map[int]string)
+	for _, l := range resp.Data.Lessons {
+		subjects[l.ID] = l.Subject
+	}
+
+	for _, hw := range resp.Data.Homeworks {
+		if hw.DueDate == tomorrowInt && !hw.Completed {
+			subject := subjects[hw.LessonID]
+			target := untis.NotificationTarget{Type: user.NotificationTarget, Address: user.NotificationAddress}
+
+			s.notifyHooks(ctx, discordUserID, target, subject, tomorrow.Format("02.01.2006"), "HOMEWORK_DUE", "", hw.Text)
+		}
+	}
+
+	return nil
+}
+
+// -- SYNC ---
+
+func (s *UntisService) Sync(ctx context.Context, id string) bool {
+	start := utils.FloorToDay(time.Now().AddDate(0, 0, -2))
+	end := utils.EndOfDay(time.Now().AddDate(0, 0, 7))
+
+	err := s.SyncUserTimetable(ctx, id, start, end)
+	if IsAuthError(err) {
+		slog.Warn("Auth failure for user, skipping further sync tasks", "user", id)
+		return false
+	}
+
+	_ = s.SyncUserAbsences(ctx, id)
+	_ = s.SyncUserExams(ctx, id)
+	return true
+}
+
 // --- SYNC: ABSENCES ---
 
 func (s *UntisService) SyncUserAbsences(ctx context.Context, discordUserID string) error {
@@ -391,6 +451,9 @@ func (s *UntisService) SyncUserExams(ctx context.Context, discordUserID string) 
 	}
 
 	if err := client.Authenticate(ctx); err != nil {
+		if IsAuthError(err) {
+			s.notifyHooks(ctx, user.ID, untis.NotificationTarget{Type: user.NotificationTarget, Address: user.NotificationAddress}, "System", "", "AUTH_FAILURE", "", "")
+		}
 		return err
 	}
 
@@ -546,6 +609,8 @@ func (s *UntisService) GetUserAbsences(ctx context.Context, userID string, filte
 	return records, nil
 }
 
+// --- USER EXAMS ---
+
 func (s *UntisService) GetUpcomingExams(ctx context.Context, userID string) ([]untis.ExamRecord, error) {
 	rows, err := s.db.QueryContext(ctx, `SELECT untis_id, exam_date, start_time, end_time, subject, name FROM exams WHERE user_id = $1 AND exam_date >= CURRENT_DATE ORDER BY exam_date ASC LIMIT 15`, userID)
 	if err != nil {
@@ -579,6 +644,9 @@ func (s *UntisService) GetTimetable(ctx context.Context, userID string, start, e
 		return nil, fmt.Errorf("failed to create untis client: %w", err)
 	}
 	if err := client.Authenticate(ctx); err != nil {
+		if IsAuthError(err) {
+			s.notifyHooks(ctx, user.ID, untis.NotificationTarget{Type: user.NotificationTarget, Address: user.NotificationAddress}, "System", "", "AUTH_FAILURE", "", "")
+		}
 		return nil, err
 	}
 	return client.GetMyTimetable(ctx, start, end)
@@ -653,6 +721,8 @@ func (s *UntisService) GetUniqueSubjects(ctx context.Context, userID string, fil
 	return subs, nil
 }
 
+// --- GENERATION ---
+
 func (s *UntisService) GenerateScheduleImage(timetable *api.TimetableEntry, daysCount int, themeID string) (io.Reader, error) {
 	config := DefaultRenderConfig()
 	config.DaysCount = daysCount
@@ -666,16 +736,17 @@ func (s *UntisService) GenerateScheduleImage(timetable *api.TimetableEntry, days
 	return renderer.Draw()
 }
 
-func (s *UntisService) GenerateExcusePDF(ctx context.Context, userID string, untisID int) (io.Reader, error) {
+func (s *UntisService) GenerateExcusePDF(ctx context.Context, userID string, untisID int, guardian string) (io.Reader, error) {
 	user, err := s.GetUser(ctx, userID)
 	if err != nil {
 		return nil, err
 	}
 
 	var start, end time.Time
+	var startTimeInt, endTimeInt int
 	var reason string
-	query := `SELECT start_date, end_date, reason FROM absences WHERE user_id = $1 AND untis_id = $2`
-	err = s.db.QueryRowContext(ctx, query, userID, untisID).Scan(&start, &end, &reason)
+	query := `SELECT start_date, end_date, start_time, end_time, reason FROM absences WHERE user_id = $1 AND untis_id = $2`
+	err = s.db.QueryRowContext(ctx, query, userID, untisID).Scan(&start, &end, &startTimeInt, &endTimeInt, &reason)
 	if err != nil {
 		return nil, fmt.Errorf("absence not found in database: %w", err)
 	}
@@ -685,25 +756,33 @@ func (s *UntisService) GenerateExcusePDF(ctx context.Context, userID string, unt
 		dateRange = fmt.Sprintf("%s bis %s", dateRange, end.Format("02.01.2006"))
 	}
 
-	city := "Unknown"
+	startTimeStr := fmt.Sprintf("%02d:%02d", startTimeInt/100, startTimeInt%100)
+	endTimeStr := fmt.Sprintf("%02d:%02d", endTimeInt/100, endTimeInt%100)
+
+	city := "N/A"
 	school, err := s.GetSchool(ctx, strconv.Itoa(int(user.UntisSchoolID)))
 	if err == nil && school != nil && school.Address != "" {
 		city = school.Address
 	}
 
 	data := ExcuseData{
-		StudentName:    user.DisplayName,
-		StudentID:      int(user.UntisPersonID),
+		StudentName:    formatUntisName(user.DisplayName),
+		StudentID:      user.UntisPersonID,
 		DateRange:      dateRange,
+		StartTime:      startTimeStr,
+		EndTime:        endTimeStr,
 		Reason:         reason,
 		City:           city,
 		SubmissionDate: time.Now().Format("02.01.2006"),
 		ReferenceID:    fmt.Sprintf("%d-ABS-%d", user.UntisPersonID, untisID),
+		Guardian:       guardian,
 	}
 
 	renderer := NewPDFRenderer()
 	return renderer.RenderExcuse(data)
 }
+
+// --- THEMING ---
 
 func (s *UntisService) GetThemes(filter string) ([]*string, error) {
 	entries, _ := os.ReadDir(ThemeFolder)
@@ -783,6 +862,29 @@ func (s *UntisService) parseTime(ts string) (int, int) {
 	return 0, 0
 }
 
+func (s *UntisService) getClientForUser(ctx context.Context, userID string) (*api.Client, error) {
+	user, err := s.GetUser(ctx, userID)
+	if err != nil {
+		return nil, err
+	}
+
+	school, err := s.GetSchool(ctx, fmt.Sprintf("%d", user.UntisSchoolID))
+	if err != nil {
+		return nil, err
+	}
+
+	client, err := api.NewClient(school.LoginName, user.UntisUser, user.UntisPassword, fmt.Sprintf("https://%s/WebUntis", school.Server))
+	if err != nil {
+		return nil, err
+	}
+
+	if err := client.Authenticate(ctx); err != nil {
+		return nil, err
+	}
+
+	return client, nil
+}
+
 func parseUntisDateTime(dateInt, timeInt int) time.Time {
 	t, _ := time.ParseInLocation("20060102 1504", fmt.Sprintf("%d %04d", dateInt, timeInt), time.Local)
 	return t
@@ -793,5 +895,9 @@ func IsAuthError(err error) bool {
 		return false
 	}
 	msg := strings.ToLower(err.Error())
-	return strings.Contains(msg, "authentication failed") && (strings.Contains(msg, "credentials") || strings.Contains(msg, "302"))
+	return strings.Contains(msg, "auth") ||
+		strings.Contains(msg, "login") ||
+		strings.Contains(msg, "password") ||
+		strings.Contains(msg, "credentials") ||
+		strings.Contains(msg, "401")
 }

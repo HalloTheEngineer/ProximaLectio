@@ -31,18 +31,18 @@ func GetSQLCreationQueries() []string {
 			);
 		`,
 		`
+			CREATE TABLE IF NOT EXISTS guilds (
+				id VARCHAR(64) PRIMARY KEY, 
+				name VARCHAR(255) NOT NULL, 
+				joined_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+			);
+		`,
+		`
 			CREATE TABLE IF NOT EXISTS guild_members (
 				user_id VARCHAR(64) REFERENCES users(id) ON DELETE CASCADE,
 				guild_id VARCHAR(64) REFERENCES guilds(id) ON DELETE CASCADE,
 				joined_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
 				PRIMARY KEY (user_id, guild_id)
-			);
-		`,
-		`
-			CREATE TABLE IF NOT EXISTS guilds (
-				id VARCHAR(64) PRIMARY KEY, 
-				name VARCHAR(255) NOT NULL, 
-				joined_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 			);
 		`,
 		`

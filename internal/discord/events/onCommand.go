@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"proximaLectio/internal/database/models/untis"
+	"proximaLectio/internal/utils"
 	"strconv"
 	"strings"
 	"time"
@@ -22,15 +23,6 @@ const (
 	MsgSchoolNotFound = "Could not find the school you provided."
 	MsgSchoolFailed   = "Could not find school. Are you logged in?"
 	MsgNotLoggedIn    = "You are not logged in."
-
-	// Timeouts for different operations
-	TimeoutQuick    = 2 * time.Second  // For fast operations like logout
-	TimeoutDefault  = 5 * time.Second  // For standard operations
-	TimeoutMedium   = 8 * time.Second  // For login and theme operations
-	TimeoutLong     = 10 * time.Second // For absences and stats
-	TimeoutExtended = 15 * time.Second // For room queries and exams
-	TimeoutSlow     = 30 * time.Second // For excuse PDF generation
-	TimeoutSchedule = 80 * time.Second // For schedule generation with image rendering
 )
 
 var (
@@ -86,82 +78,88 @@ func (h *Handler) CommandListener(e *events.ApplicationCommandInteractionCreate)
 func (h *Handler) handleLogin(e *events.ApplicationCommandInteractionCreate) {
 	data := e.SlashCommandInteractionData()
 
-	ctx, cancel := context.WithTimeout(context.Background(), TimeoutMedium)
+	_ = e.DeferCreateMessage(true)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
 
-	// check existence of user
-	if h.DB.Untis.UserExists(ctx, e.User().ID.String()) {
-		_ = e.CreateMessage(getErrorEmbed("You are logged in, log out first!", nil))
+	userID := e.User().ID.String()
+	b := *h.Bot
+	if b == nil {
 		return
 	}
 
-	// validate params
-	params, param := parseParams(&data, "institution", "username", "password")
-	if param != nil {
-		_ = e.CreateMessage(getErrorEmbed(fmt.Sprintf("Please provide a valid %s!", *param), nil))
+	if h.DB.Untis.UserExists(ctx, userID) {
+		_, _ = b.Rest().UpdateInteractionResponse(e.ApplicationID(), e.Token(), utils.GetWarnUpdateEmbed("You are already logged in. Please use `/logout` first if you want to switch accounts."))
 		return
 	}
 
-	inst := params[0].(string)
+	institution, _ := data.OptString("institution")
+	username, _ := data.OptString("username")
+	password, _ := data.OptString("password")
 
-	// find school
 	var school *untis.School
-	var err error
-
 	var query, tenantID string
-	if _, err := strconv.Atoi(inst); err == nil {
-		tenantID = inst
+	if _, err := strconv.Atoi(institution); err == nil {
+		tenantID = institution
 	} else {
-		query = inst
+		query = institution
 	}
 
 	schools, err := h.DB.Untis.SearchSchools(ctx, query, tenantID)
-	if err != nil {
-		_ = e.CreateMessage(getErrorEmbed(MsgSchoolNotFound, err))
-		return
-	}
-	if len(schools) == 0 {
-		_ = e.CreateMessage(getErrorEmbed(MsgSchoolNotFound, nil))
+	if err != nil || len(schools) == 0 {
+		_, _ = b.Rest().UpdateInteractionResponse(e.ApplicationID(), e.Token(), utils.GetErrorUpdateEmbed("Could not find the specified school. Please use the search suggestions.", err))
 		return
 	}
 	school = &schools[0]
 
-	user, err := h.DB.Untis.LoginUser(ctx, school, params[1].(string), params[2].(string), e.User().ID.String(), e.User().Username)
+	user, err := h.DB.Untis.LoginUser(ctx, school, username, password, userID, e.User().Username)
 	if err != nil {
-		_ = e.CreateMessage(getErrorEmbed(err.Error(), nil))
+		_, _ = b.Rest().UpdateInteractionResponse(e.ApplicationID(), e.Token(), utils.GetErrorUpdateEmbed("Login failed. Please check your username and password.", err))
 		return
 	}
 
-	n := time.Now()
-	err = h.DB.Untis.SyncUserTimetable(ctx, e.User().ID.String(), FloorToDay(n), EndOfDay(n.AddDate(0, 0, 7)))
-	if err != nil {
-		_ = e.CreateMessage(getErrorEmbed("Logged in, but failed to pull schedule", err))
-		return
+	if e.GuildID() != nil {
+		h.safeSyncGuild(userID, e.GuildID().String())
 	}
 
-	_ = e.CreateMessage(getSuccessEmbed("You are logged in now!", discord.EmbedField{
-		Name:   "User",
-		Value:  fmt.Sprintf("```\nName: %s\nSchool: %s\n```", user.DisplayName, school.DisplayName),
-		Inline: nil,
-	}))
+	now := time.Now()
+	err = h.DB.Untis.SyncUserTimetable(ctx, userID, utils.FloorToDay(now), utils.EndOfDay(now.AddDate(0, 0, 7)))
+
+	successEmbed := discord.NewEmbedBuilder().
+		SetTitle("🚀 Successfully Logged In").
+		SetColor(0x2ECC71).
+		SetDescription(fmt.Sprintf("Welcome, **%s**! Your account is now linked to [**%s**](https://%s).", user.DisplayName, school.DisplayName, school.Server))
+
+	if err != nil {
+		successEmbed.SetDescription(successEmbed.Description + "\n\n⚠️ *Login was successful, but I couldn't fetch your schedule yet. It will sync automatically in the background.*")
+	}
+
+	successEmbed.AddField("School", fmt.Sprintf("`%s`", school.DisplayName), true)
+	successEmbed.AddField("Status", "✅ Initial Sync Complete", true)
+
+	_, _ = b.Rest().UpdateInteractionResponse(e.ApplicationID(), e.Token(), discord.NewMessageUpdateBuilder().
+		SetEmbeds(successEmbed.Build()).
+		Build(),
+	)
 }
 
 func (h *Handler) handleLogout(e *events.ApplicationCommandInteractionCreate) {
-	ctx, cancel := context.WithTimeout(context.Background(), TimeoutQuick)
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 
 	id := e.User().ID.String()
 
 	if !h.DB.Untis.LogoutUser(ctx, id) {
-		_ = e.CreateMessage(getErrorEmbed("An error occurred while logging out.\nPerhaps, you weren't logged in?", nil))
+		_ = e.CreateMessage(utils.GetErrorEmbed("An error occurred while logging out.\nPerhaps, you weren't logged in?", nil))
 		return
 	}
 
-	_ = e.CreateMessage(getSuccessEmbed("Logged out successfully!"))
+	_ = e.CreateMessage(utils.GetSuccessEmbed("Logged out successfully!"))
 }
 
 func (h *Handler) handleSchool(e *events.ApplicationCommandInteractionCreate) {
-	ctx, cancel := context.WithTimeout(context.Background(), TimeoutMedium)
+	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
 	defer cancel()
 
 	var err error
@@ -172,20 +170,20 @@ func (h *Handler) handleSchool(e *events.ApplicationCommandInteractionCreate) {
 
 	school, err := h.DB.Untis.GetSchool(ctx, strconv.FormatInt(user.UntisSchoolID, 10))
 	if err != nil {
-		_ = e.CreateMessage(getErrorEmbed("Failed to fetch school", err))
+		_ = e.CreateMessage(utils.GetErrorEmbed("Failed to fetch school", err))
 		return
 	}
 
 	_ = e.CreateMessage(
-		getSuccessEmbed("This is your currently connected school!",
+		utils.GetSuccessEmbed("This is your currently connected school!",
 			discord.EmbedField{
 				Name:   "Name",
-				Value:  codeBloc(school.DisplayName),
+				Value:  utils.CodeBloc(school.DisplayName),
 				Inline: &t,
 			},
 			discord.EmbedField{
 				Name:   "Address",
-				Value:  codeBloc(school.Address),
+				Value:  utils.CodeBloc(school.Address),
 				Inline: &t,
 			},
 			discord.EmbedField{
@@ -198,7 +196,7 @@ func (h *Handler) handleSchool(e *events.ApplicationCommandInteractionCreate) {
 }
 
 func (h *Handler) handlePull(e *events.ApplicationCommandInteractionCreate) {
-	ctx, cancel := context.WithTimeout(context.Background(), TimeoutDefault)
+	ctx, cancel := context.WithTimeout(context.Background(), 4*time.Second)
 	defer cancel()
 
 	var err error
@@ -206,27 +204,29 @@ func (h *Handler) handlePull(e *events.ApplicationCommandInteractionCreate) {
 		return
 	}
 
-	n := time.Now()
-
-	err = h.DB.Untis.SyncUserTimetable(ctx, e.User().ID.String(), FloorToDay(n), EndOfDay(n.AddDate(0, 0, 7)))
-	if err != nil {
-		_ = e.CreateMessage(getErrorEmbed("Failed to pull schedule", err))
-		return
+	if e.GuildID() != nil {
+		h.safeSyncGuild(e.User().ID.String(), e.GuildID().String())
 	}
 
-	_ = e.CreateMessage(getSuccessEmbed("Pulled schedule successfully!"))
+	h.DB.Untis.Sync(ctx, e.User().ID.String())
+
+	_ = e.CreateMessage(utils.GetSuccessEmbed("Data has been pulled!"))
 }
 
 func (h *Handler) handleSchedule(e *events.ApplicationCommandInteractionCreate, period TargetPeriod) {
 	data := e.SlashCommandInteractionData()
 
-	ctx, cancel := context.WithTimeout(context.Background(), TimeoutSchedule)
+	ctx, cancel := context.WithTimeout(context.Background(), 80*time.Second)
 	defer cancel()
 
 	var user *untis.User
 	var err error
 	if user, err = h.ensureLogin(ctx, e); err != nil {
 		return
+	}
+
+	if e.GuildID() != nil {
+		h.safeSyncGuild(user.ID, e.GuildID().String())
 	}
 
 	var periodStr string
@@ -250,7 +250,7 @@ func (h *Handler) handleSchedule(e *events.ApplicationCommandInteractionCreate, 
 			now = now.AddDate(0, 0, 7)
 		}
 
-		start, end = getWeekRange(now)
+		start, end = utils.GetWeekRange(now)
 		dayCount = 5
 	default:
 		slog.Error("Unhandled period type", "period", period)
@@ -259,12 +259,12 @@ func (h *Handler) handleSchedule(e *events.ApplicationCommandInteractionCreate, 
 
 	timetable, err := h.DB.Untis.GetTimetable(ctx, e.User().ID.String(), start, end)
 	if err != nil {
-		_ = e.CreateMessage(getErrorEmbed("An error occurred while fetching timetable", err))
+		_ = e.CreateMessage(utils.GetErrorEmbed("An error occurred while fetching timetable", err))
 		return
 	}
 
 	if len(timetable.Days) == 0 || (start.Equal(end) && (start.Weekday() == time.Saturday || start.Weekday() == time.Sunday)) {
-		_ = e.CreateMessage(getWarnEmbed(fmt.Sprintf("There is no schedule for %s.", periodStr)))
+		_ = e.CreateMessage(utils.GetWarnEmbed(fmt.Sprintf("There is no schedule for %s.", periodStr)))
 		return
 	}
 
@@ -272,22 +272,26 @@ func (h *Handler) handleSchedule(e *events.ApplicationCommandInteractionCreate, 
 
 	image, err := h.DB.Untis.GenerateScheduleImage(timetable, dayCount, user.ThemeID)
 	if err != nil {
-		_ = updateInteractionResp(h.Bot, e.Token(), getErrorUpdateEmbed("An error occurred while generating schedule", err))
+		_ = updateInteractionResp(h.Bot, e.Token(), utils.GetErrorUpdateEmbed("An error occurred while generating schedule", err))
 		return
 	}
 
-	_ = updateInteractionResp(h.Bot, e.Token(), getSuccessFileUpdateEmbed("schedule.png", fmt.Sprintf("The schedule of %s", periodStr), image))
+	_ = updateInteractionResp(h.Bot, e.Token(), utils.GetSuccessFileUpdateEmbed("schedule.png", fmt.Sprintf("The schedule of %s", periodStr), image))
 }
 
 func (h *Handler) handleRoom(e *events.ApplicationCommandInteractionCreate) {
 	data := e.SlashCommandInteractionData()
-	ctx, cancel := context.WithTimeout(context.Background(), TimeoutExtended)
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 
 	var err error
 	var user *untis.User
 	if user, err = h.ensureLogin(ctx, e); err != nil {
 		return
+	}
+
+	if e.GuildID() != nil {
+		h.safeSyncGuild(e.User().ID.String(), e.GuildID().String())
 	}
 
 	inp := data.String("subject")
@@ -300,7 +304,7 @@ func (h *Handler) handleRoom(e *events.ApplicationCommandInteractionCreate) {
 	}
 
 	if err != nil {
-		_ = e.CreateMessage(getErrorEmbed("Failed to query the schedule.", err))
+		_ = e.CreateMessage(utils.GetErrorEmbed("Failed to query the schedule.", err))
 		return
 	}
 
@@ -309,7 +313,7 @@ func (h *Handler) handleRoom(e *events.ApplicationCommandInteractionCreate) {
 		if inp != "" {
 			queryText = fmt.Sprintf("upcoming lessons for **%s**", inp)
 		}
-		_ = e.CreateMessage(getWarnEmbed(fmt.Sprintf("I couldn't find any %s even after syncing.", queryText)))
+		_ = e.CreateMessage(utils.GetWarnEmbed(fmt.Sprintf("I couldn't find any %s even after syncing.", queryText)))
 		return
 	}
 
@@ -329,28 +333,28 @@ func (h *Handler) handleRoom(e *events.ApplicationCommandInteractionCreate) {
 		result.Teacher,
 	)
 
-	_ = e.CreateMessage(getSuccessEmbed(msg))
+	_ = e.CreateMessage(utils.GetSuccessEmbed(msg))
 }
 
 func (h *Handler) handleSetup(e *events.ApplicationCommandInteractionCreate) {
 	data := e.SlashCommandInteractionData()
-	ctx, cancel := context.WithTimeout(context.Background(), TimeoutDefault)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
 	if !e.Member().Permissions.Has(discord.PermissionManageChannels) {
-		_ = e.CreateMessage(getWarnEmbed("You need the `Manage Channels` permission to use this command."))
+		_ = e.CreateMessage(utils.GetWarnEmbed("You need the `Manage Channels` permission to use this command."))
 		return
 	}
 
 	guild, b := e.Guild()
 	if !b {
-		_ = e.CreateMessage(getWarnEmbed("This command can only be used within a server."))
+		_ = e.CreateMessage(utils.GetWarnEmbed("This command can only be used within a server."))
 		return
 	}
 
 	err := h.DB.RegisterGuild(ctx, guild.ID.String(), guild.Name)
 	if err != nil {
-		_ = e.CreateMessage(getErrorEmbed("An error occurred while registering guild", err))
+		_ = e.CreateMessage(utils.GetErrorEmbed("An error occurred while registering guild", err))
 		return
 	}
 
@@ -374,22 +378,22 @@ func (h *Handler) handleSetupNotifications(ctx context.Context, e *events.Applic
 	case "allow":
 		err := h.DB.Untis.AllowChannel(ctx, guildID, channelID)
 		if err != nil {
-			_ = e.CreateMessage(getErrorEmbed("Failed to allow channel", err))
+			_ = e.CreateMessage(utils.GetErrorEmbed("Failed to allow channel", err))
 			return
 		}
 
-		_ = e.CreateMessage(getSuccessEmbed(
+		_ = e.CreateMessage(utils.GetSuccessEmbed(
 			fmt.Sprintf("Users are now permitted to set their notification target to <#%s>.", channelID),
 		))
 
 	case "revoke":
 		err := h.DB.Untis.RevokeChannel(ctx, guildID, channelID)
 		if err != nil {
-			_ = e.CreateMessage(getErrorEmbed("Failed to revoke channel", err))
+			_ = e.CreateMessage(utils.GetErrorEmbed("Failed to revoke channel", err))
 			return
 		}
 
-		_ = e.CreateMessage(getSuccessEmbed(
+		_ = e.CreateMessage(utils.GetSuccessEmbed(
 			fmt.Sprintf("Authorization Revoked.\nChannel <#%s> has been removed from the allow-list.", channelID),
 		))
 	}
@@ -399,13 +403,17 @@ func (h *Handler) handleNotification(e *events.ApplicationCommandInteractionCrea
 	data := e.SlashCommandInteractionData()
 	subcommand := data.SubCommandName
 
-	ctx, cancel := context.WithTimeout(context.Background(), TimeoutDefault)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
 	var err error
 	var user *untis.User
 	if user, err = h.ensureLogin(ctx, e); err != nil {
 		return
+	}
+
+	if e.GuildID() != nil {
+		h.safeSyncGuild(e.User().ID.String(), e.GuildID().String())
 	}
 
 	switch *subcommand {
@@ -435,20 +443,20 @@ func (h *Handler) handleNotificationStatus(e *events.ApplicationCommandInteracti
 	}
 
 	_ = e.CreateMessage(
-		getSuccessEmbed("Use `/notifications set` to change the configuration.\nUnless you've enabled notifications, no stats about your schedule are collected.",
+		utils.GetSuccessEmbed("Use `/notifications set` to change the configuration.\nUnless you've enabled notifications, no stats about your schedule are collected.",
 			discord.EmbedField{
 				Name:   "Status",
-				Value:  codeBloc(statusEmoji),
+				Value:  utils.CodeBloc(statusEmoji),
 				Inline: &t,
 			},
 			discord.EmbedField{
 				Name:   "Target",
-				Value:  codeBloc(target),
+				Value:  utils.CodeBloc(target),
 				Inline: &t,
 			},
 			discord.EmbedField{
 				Name:   "Address",
-				Value:  codeBloc(address),
+				Value:  utils.CodeBloc(address),
 				Inline: &f,
 			},
 		),
@@ -456,7 +464,7 @@ func (h *Handler) handleNotificationStatus(e *events.ApplicationCommandInteracti
 }
 
 func (h *Handler) handleNotificationSet(e *events.ApplicationCommandInteractionCreate, user *untis.User, data discord.SlashCommandInteractionData) {
-	ctx, cancel := context.WithTimeout(context.Background(), TimeoutDefault)
+	ctx, cancel := context.WithTimeout(context.Background(), 6*time.Second)
 	defer cancel()
 
 	enabled, hasEnabled := data.OptBool("enabled")
@@ -475,12 +483,12 @@ func (h *Handler) handleNotificationSet(e *events.ApplicationCommandInteractionC
 	}
 
 	if !hasEnabled && !hasTarget && !hasAddress {
-		_ = e.CreateMessage(getWarnEmbed("You need to provide at least one argument."))
+		_ = e.CreateMessage(utils.GetWarnEmbed("You need to provide at least one argument."))
 		return
 	}
 
 	if target != "WEBHOOK" && hasAddress {
-		_ = e.CreateMessage(getWarnEmbed("Change the target to set a webhook URL."))
+		_ = e.CreateMessage(utils.GetWarnEmbed("Change the target to set a webhook URL."))
 		return
 	}
 
@@ -489,23 +497,23 @@ func (h *Handler) handleNotificationSet(e *events.ApplicationCommandInteractionC
 
 		isAllowed, err := h.DB.Untis.IsChannelAllowed(ctx, e.GuildID().String(), address)
 		if err != nil {
-			_ = e.CreateMessage(getErrorEmbed("Error while checking for clearance", err))
+			_ = e.CreateMessage(utils.GetErrorEmbed("Error while checking for clearance", err))
 			return
 		}
 		if !isAllowed {
-			_ = e.CreateMessage(getWarnEmbed("You cant use this channel until the admin has allowed it.\nCommand: `/setup notifications allow`"))
+			_ = e.CreateMessage(utils.GetWarnEmbed("You cant use this channel until the admin has allowed it.\nCommand: `/setup notifications allow`"))
 			return
 		}
 	}
 
 	if target == "WEBHOOK" && !strings.HasPrefix(address, "https://discord.com/api/webhooks/") {
-		_ = e.CreateMessage(getErrorEmbed("Invalid Webhook URL", fmt.Errorf("webhook URLs must start with `https://discord.com/api/webhooks/`")))
+		_ = e.CreateMessage(utils.GetErrorEmbed("Invalid Webhook URL", fmt.Errorf("webhook URLs must start with `https://discord.com/api/webhooks/`")))
 		return
 	}
 
 	err := h.DB.Untis.SetNotificationConfig(ctx, user.ID, enabled, target, address)
 	if err != nil {
-		_ = e.CreateMessage(getErrorEmbed("Failed to update settings", err))
+		_ = e.CreateMessage(utils.GetErrorEmbed("Failed to update settings", err))
 		return
 	}
 
@@ -533,7 +541,7 @@ func (h *Handler) handleNotificationSet(e *events.ApplicationCommandInteractionC
 		)
 	}
 
-	err = e.CreateMessage(getSuccessEmbed(fmt.Sprintf("Notifications are now **%s**.\nTarget: `%s`\nAddress: `%s`", statusText, target, address)))
+	err = e.CreateMessage(utils.GetSuccessEmbed(fmt.Sprintf("Notifications are now **%s**.\nTarget: `%s`\nAddress: `%s`", statusText, target, address)))
 	if err != nil {
 		slog.Error(err.Error())
 	}
@@ -547,7 +555,7 @@ func (h *Handler) handleAbsences(e *events.ApplicationCommandInteractionCreate) 
 		filter = f
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), TimeoutLong)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
 	var user *untis.User
@@ -556,16 +564,20 @@ func (h *Handler) handleAbsences(e *events.ApplicationCommandInteractionCreate) 
 		return
 	}
 
+	if e.GuildID() != nil {
+		h.safeSyncGuild(e.User().ID.String(), e.GuildID().String())
+	}
+
 	_ = h.DB.Untis.SyncUserAbsences(ctx, user.ID)
 
 	records, err := h.DB.Untis.GetUserAbsences(ctx, user.ID, filter)
 	if err != nil {
-		_ = e.CreateMessage(getErrorEmbed("Failed to retrieve absences from database.", err))
+		_ = e.CreateMessage(utils.GetErrorEmbed("Failed to retrieve absences from database.", err))
 		return
 	}
 
 	if len(records) == 0 {
-		_ = e.CreateMessage(getSuccessEmbed("You have no recorded absences matching this filter."))
+		_ = e.CreateMessage(utils.GetSuccessEmbed("You have no recorded absences matching this filter."))
 		return
 	}
 
@@ -602,7 +614,7 @@ func (h *Handler) handleAbsences(e *events.ApplicationCommandInteractionCreate) 
 }
 
 func (h *Handler) handleExams(e *events.ApplicationCommandInteractionCreate) {
-	ctx, cancel := context.WithTimeout(context.Background(), TimeoutExtended)
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 
 	var user *untis.User
@@ -611,16 +623,20 @@ func (h *Handler) handleExams(e *events.ApplicationCommandInteractionCreate) {
 		return
 	}
 
+	if e.GuildID() != nil {
+		h.safeSyncGuild(e.User().ID.String(), e.GuildID().String())
+	}
+
 	_ = h.DB.Untis.SyncUserExams(ctx, user.ID)
 
 	exams, err := h.DB.Untis.GetUpcomingExams(ctx, user.ID)
 	if err != nil {
-		_ = e.CreateMessage(getErrorEmbed("Failed to retrieve exams.", err))
+		_ = e.CreateMessage(utils.GetErrorEmbed("Failed to retrieve exams.", err))
 		return
 	}
 
 	if len(exams) == 0 {
-		_ = e.CreateMessage(getWarnEmbed("You have no upcoming exams scheduled."))
+		_ = e.CreateMessage(utils.GetWarnEmbed("You have no upcoming exams scheduled."))
 		return
 	}
 
@@ -642,7 +658,7 @@ func (h *Handler) handleExams(e *events.ApplicationCommandInteractionCreate) {
 }
 
 func (h *Handler) handleStats(e *events.ApplicationCommandInteractionCreate) {
-	ctx, cancel := context.WithTimeout(context.Background(), TimeoutLong)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
 	var user *untis.User
@@ -653,7 +669,7 @@ func (h *Handler) handleStats(e *events.ApplicationCommandInteractionCreate) {
 
 	stats, err := h.DB.Untis.GetUserStats(ctx, user.ID)
 	if err != nil {
-		_ = e.CreateMessage(getErrorEmbed("Failed to calculate your statistics.", err))
+		_ = e.CreateMessage(utils.GetErrorEmbed("Failed to calculate your statistics.", err))
 		return
 	}
 
@@ -705,29 +721,27 @@ func (h *Handler) handleCommon(e *events.ApplicationCommandInteractionCreate) {
 	data := e.SlashCommandInteractionData()
 
 	if e.GuildID() == nil {
-		_ = e.CreateMessage(getWarnEmbed("This command can only be used in a guild."))
+		_ = e.CreateMessage(utils.GetWarnEmbed("This command can only be used in a guild."))
 		return
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), TimeoutLong)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	_ = h.DB.SyncGuildMembership(ctx, e.User().ID.String(), e.GuildID().String())
+	if e.GuildID() != nil {
+		h.safeSyncGuild(e.User().ID.String(), e.GuildID().String())
+	}
 
 	targetTime := time.Now()
 	isAtRequest := false
 
 	if data.SubCommandName != nil && *data.SubCommandName == "at" {
 		isAtRequest = true
-		timeInput, ok := data.OptString("time")
-		if !ok {
-			_ = e.CreateMessage(getWarnEmbed("Please provide a valid time."))
-			return
-		}
+		timeInput, _ := data.OptString("time")
 
 		parsed, err := time.Parse("15:04", timeInput)
 		if err != nil {
-			_ = e.CreateMessage(getWarnEmbed("Invalid time format. Please use `HH:MM` (e.g. 13:30)."))
+			_ = e.CreateMessage(utils.GetWarnEmbed("Invalid time format. Please use `HH:MM` (e.g. 13:30)."))
 			return
 		}
 
@@ -737,12 +751,12 @@ func (h *Handler) handleCommon(e *events.ApplicationCommandInteractionCreate) {
 
 	statuses, err := h.DB.Untis.GetGuildMemberStatusesAt(ctx, e.GuildID().String(), targetTime)
 	if err != nil {
-		_ = e.CreateMessage(getErrorEmbed("Failed to retrieve server schedule data.", err))
+		_ = e.CreateMessage(utils.GetErrorEmbed("Failed to retrieve server schedule data.", err))
 		return
 	}
 
 	if len(statuses) == 0 {
-		_ = e.CreateMessage(getWarnEmbed("No registered users found in this server."))
+		_ = e.CreateMessage(utils.GetWarnEmbed("No registered users found in this server."))
 		return
 	}
 
@@ -781,7 +795,7 @@ func (h *Handler) handleCommon(e *events.ApplicationCommandInteractionCreate) {
 
 func (h *Handler) handleTheme(e *events.ApplicationCommandInteractionCreate) {
 	data := e.SlashCommandInteractionData()
-	ctx, cancel := context.WithTimeout(context.Background(), TimeoutMedium)
+	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
 	defer cancel()
 
 	var user *untis.User
@@ -792,7 +806,7 @@ func (h *Handler) handleTheme(e *events.ApplicationCommandInteractionCreate) {
 
 	params, param := parseParams(&data, "theme")
 	if param != nil {
-		_ = e.CreateMessage(getSuccessEmbed(fmt.Sprintf("Your current theme is: `%s`", strings.ToUpper(user.ThemeID))))
+		_ = e.CreateMessage(utils.GetSuccessEmbed(fmt.Sprintf("Your current theme is: `%s`", strings.ToUpper(user.ThemeID))))
 		return
 	}
 
@@ -800,16 +814,16 @@ func (h *Handler) handleTheme(e *events.ApplicationCommandInteractionCreate) {
 
 	_, err = h.DB.Untis.GetTheme(themeStr)
 	if err != nil {
-		_ = e.CreateMessage(getErrorEmbed("Could not find the specified theme.", nil))
+		_ = e.CreateMessage(utils.GetErrorEmbed("Could not find the specified theme.", nil))
 		return
 	}
 
 	err = h.DB.Untis.SetTheme(ctx, e.User().ID.String(), themeStr)
 	if err != nil {
-		_ = e.CreateMessage(getErrorEmbed("An error occurred while setting the theme", err))
+		_ = e.CreateMessage(utils.GetErrorEmbed("An error occurred while setting the theme", err))
 	}
 
-	_ = e.CreateMessage(getSuccessEmbed(fmt.Sprintf("Theme updated successfully to `%s`!", strings.ToUpper(themeStr))))
+	_ = e.CreateMessage(utils.GetSuccessEmbed(fmt.Sprintf("Theme updated successfully to `%s`!", strings.ToUpper(themeStr))))
 }
 
 func (h *Handler) handleExcuse(e *events.ApplicationCommandInteractionCreate) {
@@ -817,11 +831,12 @@ func (h *Handler) handleExcuse(e *events.ApplicationCommandInteractionCreate) {
 
 	absenceID, ok := data.OptInt("id")
 	if !ok {
-		_ = e.CreateMessage(getWarnEmbed("Please provide a valid Absence ID. Start typing in the 'id' field to see your recent absences."))
+		_ = e.CreateMessage(utils.GetWarnEmbed("Please provide a valid Absence ID. Start typing in the 'id' field to see your recent absences."))
 		return
 	}
+	guardian := data.String("guardian")
 
-	ctx, cancel := context.WithTimeout(context.Background(), TimeoutSlow)
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
 	if _, err := h.ensureLogin(ctx, e); err != nil {
@@ -835,9 +850,9 @@ func (h *Handler) handleExcuse(e *events.ApplicationCommandInteractionCreate) {
 		return
 	}
 
-	pdfReader, err := h.DB.Untis.GenerateExcusePDF(ctx, e.User().ID.String(), absenceID)
+	pdfReader, err := h.DB.Untis.GenerateExcusePDF(ctx, e.User().ID.String(), absenceID, guardian)
 	if err != nil {
-		_, _ = b.Rest().UpdateInteractionResponse(e.ApplicationID(), e.Token(), getErrorUpdateEmbed("Failed to generate the excuse document. Make sure you selected a valid absence.", err))
+		_, _ = b.Rest().UpdateInteractionResponse(e.ApplicationID(), e.Token(), utils.GetErrorUpdateEmbed("Failed to generate the excuse document. Make sure you selected a valid absence.", err))
 		return
 	}
 
@@ -859,12 +874,12 @@ func (h *Handler) handleExcuse(e *events.ApplicationCommandInteractionCreate) {
 func (h *Handler) ensureLogin(ctx context.Context, e *events.ApplicationCommandInteractionCreate) (*untis.User, error) {
 	user, err := h.DB.Untis.GetUser(ctx, e.User().ID.String())
 	if err != nil {
-		_ = e.CreateMessage(getErrorEmbed(MsgNotLoggedIn, err))
+		_ = e.CreateMessage(utils.GetErrorEmbed(MsgNotLoggedIn, err))
 		return nil, err
 	}
 
 	if user == nil {
-		_ = e.CreateMessage(getErrorEmbed(MsgNotLoggedIn, err))
+		_ = e.CreateMessage(utils.GetErrorEmbed(MsgNotLoggedIn, err))
 		return nil, errors.New("user not found")
 	}
 	return user, nil

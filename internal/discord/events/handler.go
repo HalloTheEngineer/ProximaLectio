@@ -1,12 +1,13 @@
 package events
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"proximaLectio/internal/config"
 	"proximaLectio/internal/database"
+	"sync"
 	"time"
 
 	"github.com/disgoorg/disgo/bot"
@@ -14,16 +15,39 @@ import (
 )
 
 type Handler struct {
-	DB  *database.DB
-	Cfg *config.Config
-	Bot *bot.Client
+	DB        *database.DB
+	Cfg       *config.Config
+	Bot       *bot.Client
+	syncCache sync.Map
 }
 
 func NewHandler(db *database.DB, cfg *config.Config) *Handler {
 	return &Handler{DB: db, Cfg: cfg}
 }
 
+func (h *Handler) safeSyncGuild(userID, guildID string) {
+	cacheKey := userID + ":" + guildID
+
+	if _, found := h.syncCache.Load(cacheKey); found {
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	_ = h.DB.RegisterGuild(ctx, guildID, "Active Server")
+
+	err := h.DB.SyncGuildMembership(ctx, userID, guildID)
+	if err != nil {
+		fmt.Printf("Warning: Failed to sync guild membership for user %s: %v\n", userID, err)
+		return
+	}
+
+	h.syncCache.Store(cacheKey, true)
+}
+
 // --- UTILS ---
+
 func updateInteractionResp(bot *bot.Client, token string, msg discord.MessageUpdate) error {
 	if bot == nil {
 		return errors.New("bot is nil")
@@ -33,6 +57,7 @@ func updateInteractionResp(bot *bot.Client, token string, msg discord.MessageUpd
 	_, err := b.Rest().UpdateInteractionResponse(b.ApplicationID(), token, msg)
 	return err
 }
+
 func parseParams(data *discord.SlashCommandInteractionData, names ...string) (a []any, errParam *string) {
 	findOption := func(name string) (json.RawMessage, bool) {
 		for _, opt := range data.Options {
@@ -54,59 +79,4 @@ func parseParams(data *discord.SlashCommandInteractionData, names ...string) (a 
 		a = append(a, v)
 	}
 	return a, nil
-}
-func getWeekRange(t time.Time) (time.Time, time.Time) {
-	weekday := int(t.Weekday())
-
-	daysToSubtract := weekday - 1
-	if weekday == 0 {
-		daysToSubtract = 6
-	}
-
-	monday := FloorToDay(t.AddDate(0, 0, -daysToSubtract))
-	sunday := EndOfDay(monday.AddDate(0, 0, 6))
-
-	return monday, sunday
-}
-func FloorToDay(t time.Time) time.Time {
-	return time.Date(t.Year(), t.Month(), t.Day(), 0, 0, 0, 0, t.Location())
-}
-func EndOfDay(t time.Time) time.Time {
-	return time.Date(t.Year(), t.Month(), t.Day(), 23, 59, 59, 999999999, t.Location())
-}
-func codeBloc(str string) string {
-	return fmt.Sprintf("```\n%s\n```", str)
-}
-func getErrorEmbed(str string, err error) discord.MessageCreate {
-	emb := discord.NewEmbedBuilder().SetTimestamp(time.Now()).SetColor(16711741).SetTitle("Failed").SetDescription(str)
-
-	if err != nil {
-		emb.AddField("Error", codeBloc(err.Error()), false)
-	}
-
-	return discord.NewMessageCreateBuilder().SetEphemeral(true).AddEmbeds(emb.Build()).Build()
-}
-func getErrorUpdateEmbed(str string, err error) discord.MessageUpdate {
-	emb := discord.NewEmbedBuilder().SetTimestamp(time.Now()).SetColor(16711741).SetTitle("Failed").SetDescription(str)
-
-	if err != nil {
-		emb.AddField("Error", codeBloc(err.Error()), false)
-	}
-
-	return discord.NewMessageUpdateBuilder().AddEmbeds(emb.Build()).Build()
-}
-func getSuccessEmbed(body string, fields ...discord.EmbedField) discord.MessageCreate {
-	emb := discord.NewEmbedBuilder().SetTimestamp(time.Now()).SetColor(9036596).SetTitle("Success").SetDescription(body)
-	emb.AddFields(fields...)
-	return discord.NewMessageCreateBuilder().SetEphemeral(true).AddEmbeds(emb.Build()).Build()
-}
-func getSuccessFileEmbed(name, desc string, file io.Reader) discord.MessageCreate {
-	return discord.NewMessageCreateBuilder().AddFile(name, desc, file).SetEphemeral(true).Build()
-}
-func getSuccessFileUpdateEmbed(name, desc string, file io.Reader) discord.MessageUpdate {
-	return discord.NewMessageUpdateBuilder().AddFile(name, desc, file).Build()
-}
-func getWarnEmbed(desc string) discord.MessageCreate {
-	emb := discord.NewEmbedBuilder().SetTimestamp(time.Now()).SetColor(16751872).SetTitle("Warning").SetDescription(desc)
-	return discord.NewMessageCreateBuilder().SetEphemeral(true).AddEmbeds(emb.Build()).Build()
 }

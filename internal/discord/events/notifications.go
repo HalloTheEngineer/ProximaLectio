@@ -50,7 +50,12 @@ func (h *Handler) RegisterNotificationHooks() {
 		case "AUTH_FAILURE":
 			title = "🔒 Authentication Failed"
 			description = "The bot could no longer log into your WebUntis account. Did you change your password? Please use `/login` again to restore service."
-			color = 0xED4245 // Red
+			color = 0xED4245
+
+		case "HOMEWORK_DUE":
+			title = "📚 Homework Due Tomorrow"
+			description = fmt.Sprintf("You have homework due tomorrow (**%s**) for **%s**:\n\n> %s", date, subject, new)
+			color = 0xF1C40F
 		}
 
 		embed := discord.NewEmbedBuilder().
