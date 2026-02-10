@@ -171,7 +171,10 @@ func (c *Client) Authenticate(ctx context.Context) error {
 	data.Set("j_password", c.password)
 	data.Set("token", "")
 
-	req, _ := http.NewRequestWithContext(ctx, "POST", loginURL, strings.NewReader(data.Encode()))
+	req, err := http.NewRequestWithContext(ctx, "POST", loginURL, strings.NewReader(data.Encode()))
+	if err != nil {
+		return fmt.Errorf("failed to create login request: %w", err)
+	}
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	req.Header.Set("Accept", "application/json")
 
@@ -194,7 +197,10 @@ func (c *Client) Authenticate(ctx context.Context) error {
 	}
 
 	var loginStatus loginResponse
-	bodyBytes, _ := io.ReadAll(resp.Body)
+	bodyBytes, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return fmt.Errorf("failed to read login response body: %w", err)
+	}
 	if err := json.Unmarshal(bodyBytes, &loginStatus); err == nil {
 		if strings.ToUpper(loginStatus.State) == "FAILED" {
 			return errors.New("authentication failed: invalid credentials")
@@ -206,7 +212,10 @@ func (c *Client) Authenticate(ctx context.Context) error {
 	}
 
 	tokenURL := fmt.Sprintf("%s/api/token/new", c.baseURL)
-	reqT, _ := http.NewRequestWithContext(ctx, "GET", tokenURL, nil)
+	reqT, err := http.NewRequestWithContext(ctx, "GET", tokenURL, nil)
+	if err != nil {
+		return fmt.Errorf("failed to create token request: %w", err)
+	}
 	respT, err := c.httpClient.Do(reqT)
 	if err != nil {
 		return err
@@ -217,7 +226,10 @@ func (c *Client) Authenticate(ctx context.Context) error {
 		return errors.New("authentication failed: could not retrieve bearer token")
 	}
 
-	tokenBody, _ := io.ReadAll(respT.Body)
+	tokenBody, err := io.ReadAll(respT.Body)
+	if err != nil {
+		return fmt.Errorf("failed to read token response body: %w", err)
+	}
 	c.token = strings.Trim(string(tokenBody), "\"")
 
 	claims, err := parseJWTClaims(c.token)

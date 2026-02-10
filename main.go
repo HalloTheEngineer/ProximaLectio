@@ -13,6 +13,13 @@ import (
 	"time"
 )
 
+const (
+	// SyncInterval is how often to sync user timetables
+	SyncInterval = 2 * time.Hour
+	// ShutdownDelay is the time to wait for graceful shutdown
+	ShutdownDelay = 1 * time.Second
+)
+
 func main() {
 	cfg := config.Load()
 
@@ -26,7 +33,7 @@ func main() {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	services.StartSyncWorker(ctx, db.Untis, 2*time.Hour)
+	services.StartSyncWorker(ctx, db.Untis, SyncInterval)
 
 	go func() {
 		client := discord.Launch(db, cfg)
@@ -49,7 +56,7 @@ func main() {
 
 	cancel()
 
-	time.Sleep(1 * time.Second)
+	time.Sleep(ShutdownDelay)
 
 	slog.Info("(✓) Exiting program.")
 }

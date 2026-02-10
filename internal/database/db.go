@@ -3,8 +3,8 @@ package database
 import (
 	"context"
 	"database/sql"
-	"log"
 	"log/slog"
+	"os"
 	"proximaLectio/internal/config"
 	"proximaLectio/internal/database/models"
 	"proximaLectio/internal/database/services"
@@ -24,25 +24,34 @@ func (d *DB) Close() error {
 func Connect(cfg *config.Config) *DB {
 	db, err := sql.Open("postgres", cfg.DBConnectionString)
 	if err != nil {
-		log.Fatal(err)
+		slog.Error("Failed to open database connection", "error", err)
+		os.Exit(1)
 	}
 
 	err = db.Ping()
 	if err != nil {
-		log.Fatal(err)
+		slog.Error("Failed to ping database", "error", err)
+		os.Exit(1)
 	}
 
 	slog.Info("(✓) Connected to PostgreSQL")
 
 	for _, q := range models.GetSQLCreationQueries() {
 		if _, err = db.Exec(q); err != nil {
-			log.Fatal(err)
+			slog.Error("Failed to execute schema query", "error", err)
+			os.Exit(1)
 		}
 	}
 
-	db.Exec(`CREATE INDEX IF NOT EXISTS idx_stats_teacher ON timetable_entries(teacher);`)
-	db.Exec(`CREATE INDEX IF NOT EXISTS idx_stats_status ON timetable_entries(status);`)
-	db.Exec(`CREATE INDEX IF NOT EXISTS idx_stats_date ON timetable_entries(entry_date);`)
+	if _, err := db.Exec(`CREATE INDEX IF NOT EXISTS idx_stats_teacher ON timetable_entries(teacher);`); err != nil {
+		slog.Warn("Failed to create index idx_stats_teacher", "error", err)
+	}
+	if _, err := db.Exec(`CREATE INDEX IF NOT EXISTS idx_stats_status ON timetable_entries(status);`); err != nil {
+		slog.Warn("Failed to create index idx_stats_status", "error", err)
+	}
+	if _, err := db.Exec(`CREATE INDEX IF NOT EXISTS idx_stats_date ON timetable_entries(entry_date);`); err != nil {
+		slog.Warn("Failed to create index idx_stats_date", "error", err)
+	}
 
 	return &DB{db: db, Untis: services.NewUntisService(db)}
 }

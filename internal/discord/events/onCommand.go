@@ -22,6 +22,15 @@ const (
 	MsgSchoolNotFound = "Could not find the school you provided."
 	MsgSchoolFailed   = "Could not find school. Are you logged in?"
 	MsgNotLoggedIn    = "You are not logged in."
+
+	// Timeouts for different operations
+	TimeoutQuick    = 2 * time.Second  // For fast operations like logout
+	TimeoutDefault  = 5 * time.Second  // For standard operations
+	TimeoutMedium   = 8 * time.Second  // For login and theme operations
+	TimeoutLong     = 10 * time.Second // For absences and stats
+	TimeoutExtended = 15 * time.Second // For room queries and exams
+	TimeoutSlow     = 30 * time.Second // For excuse PDF generation
+	TimeoutSchedule = 80 * time.Second // For schedule generation with image rendering
 )
 
 var (
@@ -77,7 +86,7 @@ func (h *Handler) CommandListener(e *events.ApplicationCommandInteractionCreate)
 func (h *Handler) handleLogin(e *events.ApplicationCommandInteractionCreate) {
 	data := e.SlashCommandInteractionData()
 
-	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), TimeoutMedium)
 	defer cancel()
 
 	// check existence of user
@@ -138,7 +147,7 @@ func (h *Handler) handleLogin(e *events.ApplicationCommandInteractionCreate) {
 }
 
 func (h *Handler) handleLogout(e *events.ApplicationCommandInteractionCreate) {
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), TimeoutQuick)
 	defer cancel()
 
 	id := e.User().ID.String()
@@ -152,7 +161,7 @@ func (h *Handler) handleLogout(e *events.ApplicationCommandInteractionCreate) {
 }
 
 func (h *Handler) handleSchool(e *events.ApplicationCommandInteractionCreate) {
-	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), TimeoutMedium)
 	defer cancel()
 
 	var err error
@@ -189,7 +198,7 @@ func (h *Handler) handleSchool(e *events.ApplicationCommandInteractionCreate) {
 }
 
 func (h *Handler) handlePull(e *events.ApplicationCommandInteractionCreate) {
-	ctx, cancel := context.WithTimeout(context.Background(), 4*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), TimeoutDefault)
 	defer cancel()
 
 	var err error
@@ -211,7 +220,7 @@ func (h *Handler) handlePull(e *events.ApplicationCommandInteractionCreate) {
 func (h *Handler) handleSchedule(e *events.ApplicationCommandInteractionCreate, period TargetPeriod) {
 	data := e.SlashCommandInteractionData()
 
-	ctx, cancel := context.WithTimeout(context.Background(), 80*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), TimeoutSchedule)
 	defer cancel()
 
 	var user *untis.User
@@ -272,7 +281,7 @@ func (h *Handler) handleSchedule(e *events.ApplicationCommandInteractionCreate, 
 
 func (h *Handler) handleRoom(e *events.ApplicationCommandInteractionCreate) {
 	data := e.SlashCommandInteractionData()
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), TimeoutExtended)
 	defer cancel()
 
 	var err error
@@ -325,7 +334,7 @@ func (h *Handler) handleRoom(e *events.ApplicationCommandInteractionCreate) {
 
 func (h *Handler) handleSetup(e *events.ApplicationCommandInteractionCreate) {
 	data := e.SlashCommandInteractionData()
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), TimeoutDefault)
 	defer cancel()
 
 	if !e.Member().Permissions.Has(discord.PermissionManageChannels) {
@@ -390,7 +399,7 @@ func (h *Handler) handleNotification(e *events.ApplicationCommandInteractionCrea
 	data := e.SlashCommandInteractionData()
 	subcommand := data.SubCommandName
 
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), TimeoutDefault)
 	defer cancel()
 
 	var err error
@@ -447,7 +456,7 @@ func (h *Handler) handleNotificationStatus(e *events.ApplicationCommandInteracti
 }
 
 func (h *Handler) handleNotificationSet(e *events.ApplicationCommandInteractionCreate, user *untis.User, data discord.SlashCommandInteractionData) {
-	ctx, cancel := context.WithTimeout(context.Background(), 6*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), TimeoutDefault)
 	defer cancel()
 
 	enabled, hasEnabled := data.OptBool("enabled")
@@ -538,7 +547,7 @@ func (h *Handler) handleAbsences(e *events.ApplicationCommandInteractionCreate) 
 		filter = f
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), TimeoutLong)
 	defer cancel()
 
 	var user *untis.User
@@ -593,7 +602,7 @@ func (h *Handler) handleAbsences(e *events.ApplicationCommandInteractionCreate) 
 }
 
 func (h *Handler) handleExams(e *events.ApplicationCommandInteractionCreate) {
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), TimeoutExtended)
 	defer cancel()
 
 	var user *untis.User
@@ -633,7 +642,7 @@ func (h *Handler) handleExams(e *events.ApplicationCommandInteractionCreate) {
 }
 
 func (h *Handler) handleStats(e *events.ApplicationCommandInteractionCreate) {
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), TimeoutLong)
 	defer cancel()
 
 	var user *untis.User
@@ -700,7 +709,7 @@ func (h *Handler) handleCommon(e *events.ApplicationCommandInteractionCreate) {
 		return
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), TimeoutLong)
 	defer cancel()
 
 	_ = h.DB.SyncGuildMembership(ctx, e.User().ID.String(), e.GuildID().String())
@@ -710,7 +719,11 @@ func (h *Handler) handleCommon(e *events.ApplicationCommandInteractionCreate) {
 
 	if data.SubCommandName != nil && *data.SubCommandName == "at" {
 		isAtRequest = true
-		timeInput, _ := data.OptString("time")
+		timeInput, ok := data.OptString("time")
+		if !ok {
+			_ = e.CreateMessage(getWarnEmbed("Please provide a valid time."))
+			return
+		}
 
 		parsed, err := time.Parse("15:04", timeInput)
 		if err != nil {
@@ -768,7 +781,7 @@ func (h *Handler) handleCommon(e *events.ApplicationCommandInteractionCreate) {
 
 func (h *Handler) handleTheme(e *events.ApplicationCommandInteractionCreate) {
 	data := e.SlashCommandInteractionData()
-	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), TimeoutMedium)
 	defer cancel()
 
 	var user *untis.User
@@ -808,7 +821,7 @@ func (h *Handler) handleExcuse(e *events.ApplicationCommandInteractionCreate) {
 		return
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), TimeoutSlow)
 	defer cancel()
 
 	if _, err := h.ensureLogin(ctx, e); err != nil {

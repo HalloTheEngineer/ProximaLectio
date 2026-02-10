@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"os"
 	"proximaLectio/internal/database/models/untis"
@@ -221,8 +222,16 @@ func (s *UntisService) LoginUser(ctx context.Context, school *untis.School, user
 }
 
 func (s *UntisService) LogoutUser(ctx context.Context, id string) bool {
-	res, _ := s.db.ExecContext(ctx, `DELETE FROM users WHERE id = $1`, id)
-	aff, _ := res.RowsAffected()
+	res, err := s.db.ExecContext(ctx, `DELETE FROM users WHERE id = $1`, id)
+	if err != nil {
+		slog.Error("Failed to delete user", "userID", id, "error", err)
+		return false
+	}
+	aff, err := res.RowsAffected()
+	if err != nil {
+		slog.Error("Failed to get rows affected", "userID", id, "error", err)
+		return false
+	}
 	return aff > 0
 }
 
@@ -261,7 +270,10 @@ func (s *UntisService) SyncUserAbsences(ctx context.Context, discordUserID strin
 		return err
 	}
 
-	client, _ := api.NewClient(school.LoginName, user.UntisUser, user.UntisPassword, fmt.Sprintf("https://%s/WebUntis", school.Server))
+	client, err := api.NewClient(school.LoginName, user.UntisUser, user.UntisPassword, fmt.Sprintf("https://%s/WebUntis", school.Server))
+	if err != nil {
+		return fmt.Errorf("failed to create untis client: %w", err)
+	}
 	if err := client.Authenticate(ctx); err != nil {
 		if IsAuthError(err) {
 			s.notifyHooks(ctx, user.ID, untis.NotificationTarget{Type: user.NotificationTarget, Address: user.NotificationAddress}, "System", "", "AUTH_FAILURE", "", "")
@@ -269,13 +281,24 @@ func (s *UntisService) SyncUserAbsences(ctx context.Context, discordUserID strin
 		return err
 	}
 
-	years, _ := client.GetSchoolYears(ctx)
+	years, err := client.GetSchoolYears(ctx)
+	if err != nil {
+		slog.Warn("Failed to get school years", "userID", discordUserID, "error", err)
+	}
 	now := time.Now()
 	syncStart, syncEnd := now.AddDate(0, 0, -30), now.AddDate(0, 0, 1)
 
 	for _, y := range years {
-		sDate, _ := time.Parse("2006-01-02", y.DateRange.Start)
-		eDate, _ := time.Parse("2006-01-02", y.DateRange.End)
+		sDate, err := time.Parse("2006-01-02", y.DateRange.Start)
+		if err != nil {
+			slog.Warn("Failed to parse school year start date", "date", y.DateRange.Start, "error", err)
+			continue
+		}
+		eDate, err := time.Parse("2006-01-02", y.DateRange.End)
+		if err != nil {
+			slog.Warn("Failed to parse school year end date", "date", y.DateRange.End, "error", err)
+			continue
+		}
 		if now.After(sDate) && now.Before(eDate.AddDate(0, 0, 1)) {
 			syncStart, syncEnd = sDate, eDate
 			break
@@ -288,7 +311,9 @@ func (s *UntisService) SyncUserAbsences(ctx context.Context, discordUserID strin
 	}
 
 	var existingCount int
-	_ = s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM absences WHERE user_id = $1`, discordUserID).Scan(&existingCount)
+	if err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM absences WHERE user_id = $1`, discordUserID).Scan(&existingCount); err != nil {
+		slog.Warn("Failed to check existing absences count", "userID", discordUserID, "error", err)
+	}
 	isInitialSync := existingCount == 0
 
 	for _, a := range absences {
@@ -318,7 +343,9 @@ func (s *UntisService) SyncUserAbsences(ctx context.Context, discordUserID strin
 			ON CONFLICT (user_id, untis_id) DO UPDATE SET
 				reason = EXCLUDED.reason, status = EXCLUDED.status, is_excused = EXCLUDED.is_excused,
 				start_time = EXCLUDED.start_time, end_time = EXCLUDED.end_time`
-		_, _ = s.db.ExecContext(ctx, query, discordUserID, a.ID, startDate, endDate, a.StartTime, a.EndTime, a.Reason, a.ExcuseStatus, a.IsExcused)
+		if _, err := s.db.ExecContext(ctx, query, discordUserID, a.ID, startDate, endDate, a.StartTime, a.EndTime, a.Reason, a.ExcuseStatus, a.IsExcused); err != nil {
+			slog.Error("Failed to upsert absence", "userID", discordUserID, "absenceID", a.ID, "error", err)
+		}
 	}
 	return nil
 }
@@ -350,9 +377,18 @@ func (s *UntisService) SearchAbsencesForAutocomplete(ctx context.Context, userID
 // --- SYNC: EXAMS ---
 
 func (s *UntisService) SyncUserExams(ctx context.Context, discordUserID string) error {
-	user, _ := s.GetUser(ctx, discordUserID)
-	school, _ := s.GetSchool(ctx, strconv.Itoa(int(user.UntisSchoolID)))
-	client, _ := api.NewClient(school.LoginName, user.UntisUser, user.UntisPassword, fmt.Sprintf("https://%s/WebUntis", school.Server))
+	user, err := s.GetUser(ctx, discordUserID)
+	if err != nil {
+		return fmt.Errorf("failed to get user: %w", err)
+	}
+	school, err := s.GetSchool(ctx, strconv.Itoa(int(user.UntisSchoolID)))
+	if err != nil {
+		return fmt.Errorf("failed to get school: %w", err)
+	}
+	client, err := api.NewClient(school.LoginName, user.UntisUser, user.UntisPassword, fmt.Sprintf("https://%s/WebUntis", school.Server))
+	if err != nil {
+		return fmt.Errorf("failed to create untis client: %w", err)
+	}
 
 	if err := client.Authenticate(ctx); err != nil {
 		return err
@@ -364,7 +400,11 @@ func (s *UntisService) SyncUserExams(ctx context.Context, discordUserID string) 
 	}
 
 	for _, day := range timetable.Days {
-		entryDate, _ := time.Parse("2006-01-02", day.Date)
+		entryDate, err := time.Parse("2006-01-02", day.Date)
+		if err != nil {
+			slog.Warn("Failed to parse exam date", "date", day.Date, "error", err)
+			continue
+		}
 		for _, slot := range day.GridEntries {
 			if slot.Status != "EXAM" {
 				continue
@@ -389,7 +429,9 @@ func (s *UntisService) SyncUserExams(ctx context.Context, discordUserID string) 
 
 			if user.NotificationsEnabled {
 				var exists bool
-				_ = s.db.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM exams WHERE user_id = $1 AND untis_id = $2)`, discordUserID, untisID).Scan(&exists)
+				if err := s.db.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM exams WHERE user_id = $1 AND untis_id = $2)`, discordUserID, untisID).Scan(&exists); err != nil {
+					slog.Warn("Failed to check exam existence", "userID", discordUserID, "examID", untisID, "error", err)
+				}
 				if !exists {
 					target := untis.NotificationTarget{Type: user.NotificationTarget, Address: user.NotificationAddress}
 					s.notifyHooks(ctx, discordUserID, target, subject, entryDate.Format("02.01.2006"), "EXAM_NEW", "", "Exam")
@@ -402,7 +444,9 @@ func (s *UntisService) SyncUserExams(ctx context.Context, discordUserID string) 
 				ON CONFLICT (user_id, untis_id) DO UPDATE SET
 					exam_date = EXCLUDED.exam_date, start_time = EXCLUDED.start_time, end_time = EXCLUDED.end_time,
 					subject = EXCLUDED.subject, name = EXCLUDED.name`
-			_, _ = s.db.ExecContext(ctx, query, discordUserID, untisID, entryDate, startTime, endTime, subject, "Exam")
+			if _, err := s.db.ExecContext(ctx, query, discordUserID, untisID, entryDate, startTime, endTime, subject, "Exam"); err != nil {
+				slog.Error("Failed to upsert exam", "userID", discordUserID, "examID", untisID, "error", err)
+			}
 		}
 	}
 	return nil
@@ -422,7 +466,11 @@ func (s *UntisService) SyncUserTimetable(ctx context.Context, id string, start, 
 	}
 
 	for _, day := range timetable.Days {
-		entryDate, _ := time.Parse("2006-01-02", day.Date)
+		entryDate, err := time.Parse("2006-01-02", day.Date)
+		if err != nil {
+			slog.Warn("Failed to parse timetable date", "date", day.Date, "error", err)
+			continue
+		}
 		for _, slot := range day.GridEntries {
 			sH, sM := s.parseTime(slot.Duration.Start)
 			startTime := fmt.Sprintf("%02d:%02d:00", sH, sM)
@@ -463,11 +511,13 @@ func (s *UntisService) SyncUserTimetable(ctx context.Context, id string, start, 
 			}
 
 			upsert := `
-				INSERT INTO timetable_entries (user_id, entry_date, start_time, end_time, subject, teacher, room, status)
-				VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-				ON CONFLICT (user_id, entry_date, start_time, subject) DO UPDATE SET
-					teacher = EXCLUDED.teacher, room = EXCLUDED.room, status = EXCLUDED.status, last_synced = NOW()`
-			_, _ = s.db.ExecContext(ctx, upsert, id, entryDate, startTime, endTime, subject, teacher, room, slot.Status)
+			INSERT INTO timetable_entries (user_id, entry_date, start_time, end_time, subject, teacher, room, status)
+			VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+			ON CONFLICT (user_id, entry_date, start_time, subject) DO UPDATE SET
+				teacher = EXCLUDED.teacher, room = EXCLUDED.room, status = EXCLUDED.status, last_synced = NOW()`
+			if _, err := s.db.ExecContext(ctx, upsert, id, entryDate, startTime, endTime, subject, teacher, room, slot.Status); err != nil {
+				slog.Error("Failed to upsert timetable entry", "userID", id, "subject", subject, "date", entryDate, "error", err)
+			}
 		}
 	}
 	return nil
@@ -516,9 +566,18 @@ func (s *UntisService) GetUpcomingExams(ctx context.Context, userID string) ([]u
 }
 
 func (s *UntisService) GetTimetable(ctx context.Context, userID string, start, end time.Time) (*api.TimetableEntry, error) {
-	user, _ := s.GetUser(ctx, userID)
-	school, _ := s.GetSchool(ctx, strconv.Itoa(int(user.UntisSchoolID)))
-	client, _ := api.NewClient(school.LoginName, user.UntisUser, user.UntisPassword, fmt.Sprintf("https://%s/WebUntis", school.Server))
+	user, err := s.GetUser(ctx, userID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get user: %w", err)
+	}
+	school, err := s.GetSchool(ctx, strconv.Itoa(int(user.UntisSchoolID)))
+	if err != nil {
+		return nil, fmt.Errorf("failed to get school: %w", err)
+	}
+	client, err := api.NewClient(school.LoginName, user.UntisUser, user.UntisPassword, fmt.Sprintf("https://%s/WebUntis", school.Server))
+	if err != nil {
+		return nil, fmt.Errorf("failed to create untis client: %w", err)
+	}
 	if err := client.Authenticate(ctx); err != nil {
 		return nil, err
 	}
@@ -527,10 +586,18 @@ func (s *UntisService) GetTimetable(ctx context.Context, userID string, start, e
 
 func (s *UntisService) GetUserStats(ctx context.Context, userID string) (*untis.UserStats, error) {
 	stats := &untis.UserStats{}
-	_ = s.db.QueryRowContext(ctx, `SELECT COUNT(*), COUNT(*) FILTER (WHERE status = 'CANCELLED'), COUNT(*) FILTER (WHERE status = 'SUBSTITUTION') FROM timetable_entries WHERE user_id = $1`, userID).Scan(&stats.TotalLessons, &stats.CancelledCount, &stats.SubstitutionCount)
-	_ = s.db.QueryRowContext(ctx, `SELECT room FROM timetable_entries WHERE user_id = $1 AND room != '' GROUP BY room ORDER BY COUNT(*) DESC LIMIT 1`, userID).Scan(&stats.MostVisitedRoom)
-	_ = s.db.QueryRowContext(ctx, `SELECT COUNT(*), COUNT(*) FILTER (WHERE is_excused = FALSE) FROM absences WHERE user_id = $1`, userID).Scan(&stats.TotalAbsences, &stats.UnexcusedAbsences)
-	_ = s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM exams WHERE user_id = $1 AND exam_date >= CURRENT_DATE`, userID).Scan(&stats.UpcomingExams)
+	if err := s.db.QueryRowContext(ctx, `SELECT COUNT(*), COUNT(*) FILTER (WHERE status = 'CANCELLED'), COUNT(*) FILTER (WHERE status = 'SUBSTITUTION') FROM timetable_entries WHERE user_id = $1`, userID).Scan(&stats.TotalLessons, &stats.CancelledCount, &stats.SubstitutionCount); err != nil {
+		slog.Warn("Failed to get timetable stats", "userID", userID, "error", err)
+	}
+	if err := s.db.QueryRowContext(ctx, `SELECT room FROM timetable_entries WHERE user_id = $1 AND room != '' GROUP BY room ORDER BY COUNT(*) DESC LIMIT 1`, userID).Scan(&stats.MostVisitedRoom); err != nil && err != sql.ErrNoRows {
+		slog.Warn("Failed to get most visited room", "userID", userID, "error", err)
+	}
+	if err := s.db.QueryRowContext(ctx, `SELECT COUNT(*), COUNT(*) FILTER (WHERE is_excused = FALSE) FROM absences WHERE user_id = $1`, userID).Scan(&stats.TotalAbsences, &stats.UnexcusedAbsences); err != nil {
+		slog.Warn("Failed to get absence stats", "userID", userID, "error", err)
+	}
+	if err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM exams WHERE user_id = $1 AND exam_date >= CURRENT_DATE`, userID).Scan(&stats.UpcomingExams); err != nil {
+		slog.Warn("Failed to get upcoming exams count", "userID", userID, "error", err)
+	}
 	return stats, nil
 }
 

@@ -17,11 +17,11 @@ func (h *Handler) AutocompleteListener(e *events.AutocompleteInteractionCreate) 
 	switch e.Data.CommandName {
 	case "login":
 		go func() {
-			ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
+			ctx, cancel := context.WithTimeout(context.Background(), TimeoutMedium)
 			defer cancel()
 
 			if err := e.AutocompleteResult(h.buildSchoolAutocomplete(ctx, e)); err != nil {
-				slog.Error(err.Error())
+				slog.Error("failed to build school autocomplete", "error", err)
 			}
 		}()
 	case "theme":

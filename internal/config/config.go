@@ -1,8 +1,7 @@
 package config
 
 import (
-	"fmt"
-	"log"
+	"log/slog"
 	"os"
 	"strings"
 )
@@ -33,7 +32,8 @@ func Load() *Config {
 	}
 
 	if len(s) > 0 {
-		log.Fatal(fmt.Sprintf("Please set environment variable: [%s]", strings.Join(s, " ")))
+		slog.Error("Missing required environment variables", "variables", strings.Join(s, " "))
+		os.Exit(1)
 	}
 
 	return config
