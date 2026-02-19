@@ -12,6 +12,7 @@ type Config struct {
 	BotToken           string
 	DBConnectionString string
 	EncryptionKey      string
+	HealthPort         string
 }
 
 func Load() *Config {
@@ -21,6 +22,7 @@ func Load() *Config {
 		BotToken:           os.Getenv("DISCORD_TOKEN"),
 		DBConnectionString: os.Getenv("DB_CONNECTION_STRING"),
 		EncryptionKey:      getEnvWithDefault("ENCRYPTION_KEY", "default-32-byte-encryption!"),
+		HealthPort:         getEnvWithDefault("HEALTH_PORT", "8080"),
 	}
 
 	var missing []string

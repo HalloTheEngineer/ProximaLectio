@@ -28,7 +28,7 @@ func main() {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	healthChecker := health.NewChecker(db.RawDB(), "8080")
+	healthChecker := health.NewChecker(db.RawDB(), cfg.HealthPort)
 	healthChecker.Start()
 
 	services.StartSyncWorker(ctx, db.Untis, constants.ScheduleSyncCron, constants.HomeworkAlertCron, constants.CleanupCron)

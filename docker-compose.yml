@@ -20,6 +20,9 @@ services:
       # Security
       - ENCRYPTION_KEY=${ENCRYPTION_KEY:-default-32-byte-encryption!}
 
+      # Health Check Port (change if port 8080 is already in use)
+      - HEALTH_PORT=${HEALTH_PORT:-8080}
+
       # Database Configuration
       # Note: 'db' matches the service name below
       - DB_HOST=db
@@ -37,8 +40,9 @@ services:
       options:
         max-size: "10m"
         max-file: "3"
-    ports:
-      - "8080:8080"
+    # Comment out or remove ports section for Coolify
+    # ports:
+    #   - "${HEALTH_PORT:-8080}:${HEALTH_PORT:-8080}"
 
   db:
     image: postgres:16-alpine
