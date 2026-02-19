@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"proximaLectio/internal/constants"
 	"proximaLectio/internal/database/models/untis"
 	"proximaLectio/internal/utils"
 	"strconv"
@@ -63,6 +64,8 @@ func (h *Handler) CommandListener(e *events.ApplicationCommandInteractionCreate)
 		h.handleAbsences(e)
 	case "exams":
 		h.handleExams(e)
+	case "homework":
+		h.handleHomework(e)
 	case "stats":
 		h.handleStats(e)
 	case "common":
@@ -80,7 +83,7 @@ func (h *Handler) handleLogin(e *events.ApplicationCommandInteractionCreate) {
 
 	_ = e.DeferCreateMessage(true)
 
-	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), constants.TimeoutLong)
 	defer cancel()
 
 	userID := e.User().ID.String()
@@ -128,7 +131,7 @@ func (h *Handler) handleLogin(e *events.ApplicationCommandInteractionCreate) {
 
 	successEmbed := discord.NewEmbedBuilder().
 		SetTitle("🚀 Successfully Logged In").
-		SetColor(0x2ECC71).
+		SetColor(constants.ColorSuccess).
 		SetDescription(fmt.Sprintf("Welcome, **%s**! Your account is now linked to [**%s**](https://%s).", user.DisplayName, school.DisplayName, school.Server))
 
 	if err != nil {
@@ -145,7 +148,7 @@ func (h *Handler) handleLogin(e *events.ApplicationCommandInteractionCreate) {
 }
 
 func (h *Handler) handleLogout(e *events.ApplicationCommandInteractionCreate) {
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), constants.TimeoutShort)
 	defer cancel()
 
 	id := e.User().ID.String()
@@ -159,7 +162,7 @@ func (h *Handler) handleLogout(e *events.ApplicationCommandInteractionCreate) {
 }
 
 func (h *Handler) handleSchool(e *events.ApplicationCommandInteractionCreate) {
-	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), constants.TimeoutMedium)
 	defer cancel()
 
 	var err error
@@ -196,7 +199,7 @@ func (h *Handler) handleSchool(e *events.ApplicationCommandInteractionCreate) {
 }
 
 func (h *Handler) handlePull(e *events.ApplicationCommandInteractionCreate) {
-	ctx, cancel := context.WithTimeout(context.Background(), 4*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), constants.TimeoutMedium)
 	defer cancel()
 
 	var err error
@@ -216,7 +219,7 @@ func (h *Handler) handlePull(e *events.ApplicationCommandInteractionCreate) {
 func (h *Handler) handleSchedule(e *events.ApplicationCommandInteractionCreate, period TargetPeriod) {
 	data := e.SlashCommandInteractionData()
 
-	ctx, cancel := context.WithTimeout(context.Background(), 80*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), constants.TimeoutRender)
 	defer cancel()
 
 	var user *untis.User
@@ -268,7 +271,7 @@ func (h *Handler) handleSchedule(e *events.ApplicationCommandInteractionCreate, 
 		return
 	}
 
-	_ = e.DeferCreateMessage(true)
+	_ = e.DeferCreateMessage(false)
 
 	image, err := h.DB.Untis.GenerateScheduleImage(timetable, dayCount, user.ThemeID)
 	if err != nil {
@@ -281,7 +284,7 @@ func (h *Handler) handleSchedule(e *events.ApplicationCommandInteractionCreate, 
 
 func (h *Handler) handleRoom(e *events.ApplicationCommandInteractionCreate) {
 	data := e.SlashCommandInteractionData()
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), constants.TimeoutLong)
 	defer cancel()
 
 	var err error
@@ -333,12 +336,19 @@ func (h *Handler) handleRoom(e *events.ApplicationCommandInteractionCreate) {
 		result.Teacher,
 	)
 
-	_ = e.CreateMessage(utils.GetSuccessEmbed(msg))
+	_ = e.CreateMessage(discord.NewMessageCreateBuilder().SetEmbeds(
+		discord.NewEmbedBuilder().
+			SetTimestamp(time.Now()).
+			SetColor(constants.ColorPrimary).
+			SetTitle("Room Found").
+			SetDescription(msg).
+			Build(),
+	).Build())
 }
 
 func (h *Handler) handleSetup(e *events.ApplicationCommandInteractionCreate) {
 	data := e.SlashCommandInteractionData()
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), constants.TimeoutShort)
 	defer cancel()
 
 	if !e.Member().Permissions.Has(discord.PermissionManageChannels) {
@@ -403,7 +413,7 @@ func (h *Handler) handleNotification(e *events.ApplicationCommandInteractionCrea
 	data := e.SlashCommandInteractionData()
 	subcommand := data.SubCommandName
 
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), constants.TimeoutShort)
 	defer cancel()
 
 	var err error
@@ -464,7 +474,7 @@ func (h *Handler) handleNotificationStatus(e *events.ApplicationCommandInteracti
 }
 
 func (h *Handler) handleNotificationSet(e *events.ApplicationCommandInteractionCreate, user *untis.User, data discord.SlashCommandInteractionData) {
-	ctx, cancel := context.WithTimeout(context.Background(), 6*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), constants.TimeoutShort)
 	defer cancel()
 
 	enabled, hasEnabled := data.OptBool("enabled")
@@ -534,7 +544,7 @@ func (h *Handler) handleNotificationSet(e *events.ApplicationCommandInteractionC
 			discord.
 				NewEmbedBuilder().
 				SetTimestamp(time.Now()).
-				SetColor(9036596).
+				SetColor(constants.ColorPrimary).
 				SetTitle("Update <a:alert:1467490337839648818>").
 				SetDescription(fmt.Sprintf("<@%s>\nYou are now receiving notifications here.", user.ID)).
 				Build(),
@@ -555,7 +565,7 @@ func (h *Handler) handleAbsences(e *events.ApplicationCommandInteractionCreate) 
 		filter = f
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), constants.TimeoutMedium)
 	defer cancel()
 
 	var user *untis.User
@@ -583,7 +593,7 @@ func (h *Handler) handleAbsences(e *events.ApplicationCommandInteractionCreate) 
 
 	embed := discord.NewEmbedBuilder().
 		SetTitle("Your Absences").
-		SetColor(9036596).
+		SetColor(constants.ColorPrimary).
 		SetDescription("Here are your recorded absences of the current school-year:")
 
 	for i, r := range records {
@@ -614,7 +624,7 @@ func (h *Handler) handleAbsences(e *events.ApplicationCommandInteractionCreate) 
 }
 
 func (h *Handler) handleExams(e *events.ApplicationCommandInteractionCreate) {
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), constants.TimeoutLong)
 	defer cancel()
 
 	var user *untis.User
@@ -642,7 +652,7 @@ func (h *Handler) handleExams(e *events.ApplicationCommandInteractionCreate) {
 
 	embed := discord.NewEmbedBuilder().
 		SetTitle("📝 Upcoming Exams").
-		SetColor(0x9B59B6).
+		SetColor(constants.ColorInfo).
 		SetDescription("Here are your upcoming tests and exams:")
 
 	for _, ex := range exams {
@@ -657,8 +667,75 @@ func (h *Handler) handleExams(e *events.ApplicationCommandInteractionCreate) {
 	_ = e.CreateMessage(discord.NewMessageCreateBuilder().SetEmbeds(embed.Build()).Build())
 }
 
+func (h *Handler) handleHomework(e *events.ApplicationCommandInteractionCreate) {
+	data := e.SlashCommandInteractionData()
+
+	filter := 0
+	if f, ok := data.OptInt("filter"); ok {
+		filter = f
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), constants.TimeoutMedium)
+	defer cancel()
+
+	var user *untis.User
+	var err error
+	if user, err = h.ensureLogin(ctx, e); err != nil {
+		return
+	}
+
+	if e.GuildID() != nil {
+		h.safeSyncGuild(e.User().ID.String(), e.GuildID().String())
+	}
+
+	_ = h.DB.Untis.SyncUserHomeworks(ctx, user.ID)
+
+	homeworks, err := h.DB.Untis.GetUserHomeworks(ctx, user.ID, filter)
+	if err != nil {
+		_ = e.CreateMessage(utils.GetErrorEmbed("Failed to retrieve homework from database.", err))
+		return
+	}
+
+	if len(homeworks) == 0 {
+		_ = e.CreateMessage(utils.GetSuccessEmbed("You have no homework assignments matching this filter."))
+		return
+	}
+
+	embed := discord.NewEmbedBuilder().
+		SetTitle("📚 Your Homework").
+		SetColor(constants.ColorInfo).
+		SetDescription("Here are your homework assignments:")
+
+	for i, hw := range homeworks {
+		if i >= 10 {
+			embed.SetFooter(fmt.Sprintf("...and %d more", len(homeworks)-10), "")
+			break
+		}
+
+		status := "⏳ Pending"
+		if hw.Completed {
+			status = "✅ Completed"
+		}
+
+		dueStr := hw.DueDate.Format("02.01.2006")
+		subject := hw.Subject
+		if subject == "" {
+			subject = "General"
+		}
+
+		text := hw.Text
+		if len(text) > 100 {
+			text = text[:97] + "..."
+		}
+
+		embed.AddField(fmt.Sprintf("%s (%s) - %s", subject, dueStr, status), text, false)
+	}
+
+	_ = e.CreateMessage(discord.NewMessageCreateBuilder().SetEphemeral(true).SetEmbeds(embed.Build()).Build())
+}
+
 func (h *Handler) handleStats(e *events.ApplicationCommandInteractionCreate) {
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), constants.TimeoutMedium)
 	defer cancel()
 
 	var user *untis.User
@@ -681,7 +758,7 @@ func (h *Handler) handleStats(e *events.ApplicationCommandInteractionCreate) {
 	embed := discord.NewEmbedBuilder().
 		SetTitle("Your Insights").
 		SetDescription(fmt.Sprintf("Statistics for **%s** based on synchronized data.", user.Username)).
-		SetColor(0x2ECC71).
+		SetColor(constants.ColorSuccess).
 		SetThumbnail(e.User().EffectiveAvatarURL())
 
 	// Timetable Section
@@ -725,7 +802,7 @@ func (h *Handler) handleCommon(e *events.ApplicationCommandInteractionCreate) {
 		return
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), constants.TimeoutMedium)
 	defer cancel()
 
 	if e.GuildID() != nil {
@@ -762,7 +839,7 @@ func (h *Handler) handleCommon(e *events.ApplicationCommandInteractionCreate) {
 
 	embed := discord.NewEmbedBuilder().
 		SetTitle("Common Schedule of the Guild").
-		SetColor(0x5865F2).
+		SetColor(constants.ColorInfo).
 		SetTimestamp(targetTime)
 
 	var freeUsers []string
@@ -795,7 +872,7 @@ func (h *Handler) handleCommon(e *events.ApplicationCommandInteractionCreate) {
 
 func (h *Handler) handleTheme(e *events.ApplicationCommandInteractionCreate) {
 	data := e.SlashCommandInteractionData()
-	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), constants.TimeoutMedium)
 	defer cancel()
 
 	var user *untis.User
@@ -836,7 +913,7 @@ func (h *Handler) handleExcuse(e *events.ApplicationCommandInteractionCreate) {
 	}
 	guardian := data.String("guardian")
 
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), constants.TimeoutLong)
 	defer cancel()
 
 	if _, err := h.ensureLogin(ctx, e); err != nil {

@@ -10,7 +10,9 @@ import (
 	"net/http"
 	"net/http/cookiejar"
 	"net/url"
+	"proximaLectio/internal/constants"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -24,14 +26,97 @@ const (
 	ResourceSubject ResourceType = "SUBJECT"
 )
 
+var (
+	ErrMaxRetriesExceeded = errors.New("maximum retry attempts exceeded")
+)
+
+type RateLimiter struct {
+	mu         sync.Mutex
+	tokens     int
+	maxTokens  int
+	refillRate time.Duration
+	lastRefill time.Time
+}
+
+func NewRateLimiter(rps, burst int) *RateLimiter {
+	return &RateLimiter{
+		tokens:     burst,
+		maxTokens:  burst,
+		refillRate: time.Second / time.Duration(rps),
+		lastRefill: time.Now(),
+	}
+}
+
+func (rl *RateLimiter) Wait(ctx context.Context) error {
+	rl.mu.Lock()
+	defer rl.mu.Unlock()
+
+	now := time.Now()
+	elapsed := now.Sub(rl.lastRefill)
+	tokensToAdd := int(elapsed / rl.refillRate)
+
+	if tokensToAdd > 0 {
+		rl.tokens += tokensToAdd
+		if rl.tokens > rl.maxTokens {
+			rl.tokens = rl.maxTokens
+		}
+		rl.lastRefill = now
+	}
+
+	if rl.tokens > 0 {
+		rl.tokens--
+		return nil
+	}
+
+	waitTime := rl.refillRate - (elapsed % rl.refillRate)
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-time.After(waitTime):
+		rl.tokens = 0
+		rl.lastRefill = time.Now()
+		return nil
+	}
+}
+
 type Client struct {
-	httpClient *http.Client
-	baseURL    string
-	school     string
-	username   string
-	password   string
-	token      string
-	claims     *JWTClaims
+	httpClient     *http.Client
+	baseURL        string
+	school         string
+	username       string
+	password       string
+	token          string
+	claims         *JWTClaims
+	maxRetries     int
+	retryDelay     time.Duration
+	requestTimeout time.Duration
+	rateLimiter    *RateLimiter
+}
+
+type ClientOption func(*Client)
+
+func WithMaxRetries(max int) ClientOption {
+	return func(c *Client) {
+		c.maxRetries = max
+	}
+}
+
+func WithRetryDelay(d time.Duration) ClientOption {
+	return func(c *Client) {
+		c.retryDelay = d
+	}
+}
+
+func WithRequestTimeout(d time.Duration) ClientOption {
+	return func(c *Client) {
+		c.requestTimeout = d
+	}
+}
+
+func WithRateLimit(rps, burst int) ClientOption {
+	return func(c *Client) {
+		c.rateLimiter = NewRateLimiter(rps, burst)
+	}
 }
 
 type JWTClaims struct {
@@ -52,17 +137,17 @@ type SchoolYear struct {
 	ID        int    `json:"id"`
 	Name      string `json:"name"`
 	DateRange struct {
-		Start string `json:"start"` // Format: "2025-08-27"
-		End   string `json:"end"`   // Format: "2026-07-10"
+		Start string `json:"start"`
+		End   string `json:"end"`
 	} `json:"dateRange"`
 }
 
 type Absence struct {
 	ID           int    `json:"id"`
-	StartDate    int    `json:"startDate"` // Format: YYYYMMDD
-	EndDate      int    `json:"endDate"`   // Format: YYYYMMDD
-	StartTime    int    `json:"startTime"` // Format: HHMM
-	EndTime      int    `json:"endTime"`   // Format: HHMM
+	StartDate    int    `json:"startDate"`
+	EndDate      int    `json:"endDate"`
+	StartTime    int    `json:"startTime"`
+	EndTime      int    `json:"endTime"`
 	Reason       string `json:"reason"`
 	ReasonID     int    `json:"reasonId"`
 	Text         string `json:"text"`
@@ -96,14 +181,15 @@ type LessonSlot struct {
 		Start string `json:"start"`
 		End   string `json:"end"`
 	} `json:"duration"`
-	Status    string     `json:"status"`
-	Position1 []Position `json:"position1"`
-	Position2 []Position `json:"position2"`
-	Position3 []Position `json:"position3"`
-	Position4 []Position `json:"position4"`
-	Position5 []Position `json:"position5"`
-	Position6 []Position `json:"position6"`
-	Position7 []Position `json:"position7"`
+	Status           string     `json:"status"`
+	SubstitutionText string     `json:"substitutionText"`
+	Position1        []Position `json:"position1"`
+	Position2        []Position `json:"position2"`
+	Position3        []Position `json:"position3"`
+	Position4        []Position `json:"position4"`
+	Position5        []Position `json:"position5"`
+	Position6        []Position `json:"position6"`
+	Position7        []Position `json:"position7"`
 }
 
 type Position struct {
@@ -128,9 +214,9 @@ type AppDataResponse struct {
 
 type Exam struct {
 	ID        int    `json:"id"`
-	Date      int    `json:"date"`      // Format: YYYYMMDD
-	StartTime int    `json:"startTime"` // Format: HHMM
-	EndTime   int    `json:"endTime"`   // Format: HHMM
+	Date      int    `json:"date"`
+	StartTime int    `json:"startTime"`
+	EndTime   int    `json:"endTime"`
 	Subject   string `json:"subject"`
 	Name      string `json:"name"`
 	ExamType  string `json:"examType"`
@@ -168,9 +254,7 @@ type loginResponse struct {
 	SwitchUI bool   `json:"switchUI"`
 }
 
-// NewClient initializes the WebUntis client.
-// It returns an error if the baseURL is empty.
-func NewClient(school, username, password, baseURL string) (*Client, error) {
+func NewClient(school, username, password, baseURL string, opts ...ClientOption) (*Client, error) {
 	if baseURL == "" {
 		return nil, errors.New("WebUntis base URL cannot be empty")
 	}
@@ -180,16 +264,32 @@ func NewClient(school, username, password, baseURL string) (*Client, error) {
 		return nil, fmt.Errorf("failed to create cookie jar: %w", err)
 	}
 
-	return &Client{
-		httpClient: &http.Client{Jar: jar, Timeout: 30 * time.Second},
-		baseURL:    strings.TrimSuffix(baseURL, "/"),
-		school:     school,
-		username:   username,
-		password:   password,
-	}, nil
+	client := &Client{
+		httpClient:     &http.Client{Jar: jar, Timeout: 30 * time.Second},
+		baseURL:        strings.TrimSuffix(baseURL, "/"),
+		school:         school,
+		username:       username,
+		password:       password,
+		maxRetries:     3,
+		retryDelay:     1 * time.Second,
+		requestTimeout: 30 * time.Second,
+		rateLimiter:    NewRateLimiter(constants.RateLimitRPS, constants.RateLimitBurst),
+	}
+
+	for _, opt := range opts {
+		opt(client)
+	}
+
+	return client, nil
 }
 
 func (c *Client) Authenticate(ctx context.Context) error {
+	if c.rateLimiter != nil {
+		if err := c.rateLimiter.Wait(ctx); err != nil {
+			return err
+		}
+	}
+
 	loginURL := fmt.Sprintf("%s/j_spring_security_check", c.baseURL)
 
 	data := url.Values{}
@@ -277,13 +377,13 @@ func (c *Client) EnsureToken(ctx context.Context) error {
 
 func (c *Client) GetAppData(ctx context.Context) (*AppDataResponse, error) {
 	var data AppDataResponse
-	err := c.doREST(ctx, "GET", "/api/rest/view/v1/app/data", nil, &data)
+	err := c.doREST(ctx, "GET", "/api/rest/view/v1/app/data", nil, &data, 0)
 	return &data, err
 }
 
 func (c *Client) GetSchoolYears(ctx context.Context) ([]SchoolYear, error) {
 	var years []SchoolYear
-	err := c.doREST(ctx, "GET", "/api/rest/view/v1/schoolyears", nil, &years)
+	err := c.doREST(ctx, "GET", "/api/rest/view/v1/schoolyears", nil, &years, 0)
 	return years, err
 }
 
@@ -296,7 +396,7 @@ func (c *Client) GetAbsences(ctx context.Context, start, end time.Time) ([]Absen
 	path := fmt.Sprintf("/api/classreg/absences/students?startDate=%s&endDate=%s&studentId=%d&excuseStatusId=-1",
 		sStr, eStr, c.claims.PersonID)
 
-	err := c.doREST(ctx, "GET", path, nil, &response)
+	err := c.doREST(ctx, "GET", path, nil, &response, 0)
 	return response.Data.Absences, err
 }
 
@@ -308,7 +408,7 @@ func (c *Client) GetMyTimetable(ctx context.Context, start, end time.Time) (*Tim
 		sStr, eStr, c.claims.PersonID)
 
 	var data TimetableEntry
-	err := c.doREST(ctx, "GET", path, nil, &data)
+	err := c.doREST(ctx, "GET", path, nil, &data, 0)
 	return &data, err
 }
 
@@ -319,32 +419,54 @@ func (c *Client) GetHomeworks(ctx context.Context, start, end time.Time) (*Homew
 	path := fmt.Sprintf("/api/homeworks/lessons?startDate=%s&endDate=%s", sStr, eStr)
 
 	var resp HomeworkResponse
-	err := c.doREST(ctx, "GET", path, nil, &resp)
+	err := c.doREST(ctx, "GET", path, nil, &resp, 0)
 	return &resp, err
 }
 
-func (c *Client) doREST(ctx context.Context, method, path string, body io.Reader, v interface{}) error {
+func (c *Client) doREST(ctx context.Context, method, path string, body io.Reader, v interface{}, recursionDepth int) error {
+	if recursionDepth > c.maxRetries {
+		return ErrMaxRetriesExceeded
+	}
+
+	if c.rateLimiter != nil {
+		if err := c.rateLimiter.Wait(ctx); err != nil {
+			return err
+		}
+	}
+
 	if err := c.EnsureToken(ctx); err != nil {
 		return err
 	}
 
 	fullURL := c.baseURL + path
-	req, _ := http.NewRequestWithContext(ctx, method, fullURL, body)
+	req, err := http.NewRequestWithContext(ctx, method, fullURL, body)
+	if err != nil {
+		return fmt.Errorf("failed to create request: %w", err)
+	}
 	req.Header.Set("Accept", "application/json")
 	req.Header.Set("Authorization", "Bearer "+c.token)
 	req.Header.Set("Tenant-Id", c.claims.TenantID)
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
-		return err
+		if isRetryableError(err) && recursionDepth < c.maxRetries {
+			time.Sleep(c.retryDelay)
+			return c.doREST(ctx, method, path, body, v, recursionDepth+1)
+		}
+		return fmt.Errorf("request failed: %w", err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode == http.StatusUnauthorized {
 		if err := c.Authenticate(ctx); err != nil {
-			return err
+			return fmt.Errorf("re-authentication failed: %w", err)
 		}
-		return c.doREST(ctx, method, path, body, v)
+		return c.doREST(ctx, method, path, body, v, recursionDepth+1)
+	}
+
+	if resp.StatusCode >= 500 && recursionDepth < c.maxRetries {
+		time.Sleep(c.retryDelay)
+		return c.doREST(ctx, method, path, body, v, recursionDepth+1)
 	}
 
 	if resp.StatusCode >= 400 {
@@ -352,6 +474,16 @@ func (c *Client) doREST(ctx context.Context, method, path string, body io.Reader
 	}
 
 	return json.NewDecoder(resp.Body).Decode(v)
+}
+
+func isRetryableError(err error) bool {
+	if err == nil {
+		return false
+	}
+	return strings.Contains(err.Error(), "timeout") ||
+		strings.Contains(err.Error(), "connection refused") ||
+		strings.Contains(err.Error(), "temporary") ||
+		strings.Contains(err.Error(), "EOF")
 }
 
 func parseJWTClaims(token string) (*JWTClaims, error) {

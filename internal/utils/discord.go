@@ -3,6 +3,7 @@ package utils
 import (
 	"fmt"
 	"io"
+	"proximaLectio/internal/constants"
 	"time"
 
 	"github.com/disgoorg/disgo/discord"
@@ -13,7 +14,7 @@ func CodeBloc(str string) string {
 }
 
 func buildErrorEmbed(str string, err error) discord.Embed {
-	emb := discord.NewEmbedBuilder().SetTimestamp(time.Now()).SetColor(16711741).SetTitle("Failed").SetDescription(str)
+	emb := discord.NewEmbedBuilder().SetTimestamp(time.Now()).SetColor(constants.ColorError).SetTitle("Failed").SetDescription(str)
 	if err != nil {
 		emb.AddField("Error", fmt.Sprintf("```\n%s\n```", err.Error()), false)
 	}
@@ -21,13 +22,13 @@ func buildErrorEmbed(str string, err error) discord.Embed {
 }
 
 func buildSuccessEmbed(body string, fields ...discord.EmbedField) discord.Embed {
-	emb := discord.NewEmbedBuilder().SetTimestamp(time.Now()).SetColor(9036596).SetTitle("Success").SetDescription(body)
+	emb := discord.NewEmbedBuilder().SetTimestamp(time.Now()).SetColor(constants.ColorPrimary).SetTitle("Success").SetDescription(body)
 	emb.AddFields(fields...)
 	return emb.Build()
 }
 
 func buildWarnEmbed(desc string) discord.Embed {
-	return discord.NewEmbedBuilder().SetTimestamp(time.Now()).SetColor(16751872).SetTitle("Warning").SetDescription(desc).Build()
+	return discord.NewEmbedBuilder().SetTimestamp(time.Now()).SetColor(constants.ColorWarning).SetTitle("Warning").SetDescription(desc).Build()
 }
 
 // --- Regular Message Handlers (discord.MessageCreate) ---

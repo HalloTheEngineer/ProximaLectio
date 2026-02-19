@@ -6,7 +6,9 @@ import (
 	"log/slog"
 	"os"
 	"proximaLectio/internal/config"
-	"proximaLectio/internal/database/models"
+	"proximaLectio/internal/constants"
+	"proximaLectio/internal/crypto"
+	"proximaLectio/internal/database/migrations"
 	"proximaLectio/internal/database/services"
 
 	_ "github.com/lib/pq"
@@ -21,12 +23,24 @@ func (d *DB) Close() error {
 	return d.db.Close()
 }
 
+func (d *DB) Ping(ctx context.Context) error {
+	return d.db.PingContext(ctx)
+}
+
+func (d *DB) RawDB() *sql.DB {
+	return d.db
+}
+
 func Connect(cfg *config.Config) *DB {
 	db, err := sql.Open("postgres", cfg.DBConnectionString)
 	if err != nil {
 		slog.Error("Failed to open database connection", "error", err)
 		os.Exit(1)
 	}
+
+	db.SetMaxOpenConns(constants.DBMaxOpenConns)
+	db.SetMaxIdleConns(constants.DBMaxIdleConns)
+	db.SetConnMaxLifetime(constants.DBConnMaxLifetime)
 
 	err = db.Ping()
 	if err != nil {
@@ -36,24 +50,18 @@ func Connect(cfg *config.Config) *DB {
 
 	slog.Info("(✓) Connected to PostgreSQL")
 
-	for _, q := range models.GetSQLCreationQueries() {
-		if _, err = db.Exec(q); err != nil {
-			slog.Error("Failed to execute schema query", "error", err)
-			os.Exit(1)
-		}
+	if err := migrations.Migrate(db); err != nil {
+		slog.Error("Failed to run migrations", "error", err)
+		os.Exit(1)
 	}
 
-	if _, err := db.Exec(`CREATE INDEX IF NOT EXISTS idx_stats_teacher ON timetable_entries(teacher);`); err != nil {
-		slog.Warn("Failed to create index idx_stats_teacher", "error", err)
-	}
-	if _, err := db.Exec(`CREATE INDEX IF NOT EXISTS idx_stats_status ON timetable_entries(status);`); err != nil {
-		slog.Warn("Failed to create index idx_stats_status", "error", err)
-	}
-	if _, err := db.Exec(`CREATE INDEX IF NOT EXISTS idx_stats_date ON timetable_entries(entry_date);`); err != nil {
-		slog.Warn("Failed to create index idx_stats_date", "error", err)
+	encryptor, err := crypto.NewEncryptor(cfg.EncryptionKey)
+	if err != nil {
+		slog.Error("Failed to initialize encryptor", "error", err)
+		os.Exit(1)
 	}
 
-	return &DB{db: db, Untis: services.NewUntisService(db)}
+	return &DB{db: db, Untis: services.NewUntisService(db, encryptor)}
 }
 
 func (d *DB) RegisterGuild(ctx context.Context, id, name string) error {

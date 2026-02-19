@@ -6,9 +6,11 @@ import (
 	"os"
 	"os/signal"
 	"proximaLectio/internal/config"
+	"proximaLectio/internal/constants"
 	"proximaLectio/internal/database"
 	"proximaLectio/internal/database/services"
 	"proximaLectio/internal/discord"
+	"proximaLectio/internal/health"
 	"syscall"
 	"time"
 )
@@ -16,7 +18,7 @@ import (
 func main() {
 	cfg := config.Load()
 
-	if cfg.Verbose == "1" {
+	if cfg.Verbose {
 		slog.SetLogLoggerLevel(slog.LevelDebug)
 	}
 
@@ -26,7 +28,10 @@ func main() {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	services.StartSyncWorker(ctx, db.Untis, "0 6-18 * * *", "0 19 * * *")
+	healthChecker := health.NewChecker(db.RawDB(), "8080")
+	healthChecker.Start()
+
+	services.StartSyncWorker(ctx, db.Untis, constants.ScheduleSyncCron, constants.HomeworkAlertCron, constants.CleanupCron)
 
 	go func() {
 		client := discord.Launch(db, cfg)
@@ -48,6 +53,13 @@ func main() {
 	slog.Info("(✓) Shutdown signal received. Cleaning up...")
 
 	cancel()
+
+	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer shutdownCancel()
+
+	if err := healthChecker.Stop(shutdownCtx); err != nil {
+		slog.Warn("Health checker shutdown error", "error", err)
+	}
 
 	time.Sleep(1 * time.Second)
 

@@ -10,6 +10,7 @@ import (
 	"image/png"
 	_ "image/png"
 	"io"
+	"log/slog"
 	"math"
 	"os"
 	"strings"
@@ -19,29 +20,21 @@ import (
 	"github.com/tdewolff/canvas/renderers"
 )
 
-var (
-	cachedFontFamily *canvas.FontFamily
-	fontLoaderOnce   sync.Once
-
-	backgroundImageCache = make(map[string]image.Image)
-	imageCacheMu         sync.RWMutex
-
-	fontFaceCache = make(map[string]*canvas.FontFace)
-	fontFaceMu    sync.Mutex
-)
-
 type RenderItem struct {
-	DayIndex  int
-	StartH    int
-	StartM    int
-	EndH      int
-	EndM      int
-	Color     color.RGBA
-	TextColor color.RGBA
-	Title     string
-	Subtitle  string
-	Footer    string
-	Status    string
+	DayIndex         int
+	StartH           int
+	StartM           int
+	EndH             int
+	EndM             int
+	Color            color.RGBA
+	TextColor        color.RGBA
+	Title            string
+	Subtitle         string
+	Footer           string
+	Status           string
+	SubstitutionText string
+	Room             string
+	Teacher          string
 }
 
 type Theme struct {
@@ -83,6 +76,7 @@ type RenderConfig struct {
 	FontSizeScale float64
 	Theme         Theme
 	DPMM          float64
+	StartDayName  string
 }
 
 func DefaultRenderConfig() RenderConfig {
@@ -136,62 +130,138 @@ func LoadTheme(themeID string) (Theme, error) {
 	return theme, err
 }
 
-type CanvasRenderer struct {
-	items  []RenderItem
-	config RenderConfig
-	family *canvas.FontFamily
+type FontCache struct {
+	mu       sync.RWMutex
+	faces    map[string]*canvas.FontFace
+	family   *canvas.FontFamily
+	loadOnce sync.Once
 }
 
-func PreWarmRenderer() {
-	_ = NewCanvasRenderer(DefaultRenderConfig(), nil)
+func NewFontCache() *FontCache {
+	return &FontCache{
+		faces: make(map[string]*canvas.FontFace),
+	}
 }
 
-func NewCanvasRenderer(config RenderConfig, items []RenderItem) *CanvasRenderer {
-	fontLoaderOnce.Do(func() {
-		cachedFontFamily = canvas.NewFontFamily("Inter")
+func (fc *FontCache) GetFamily() *canvas.FontFamily {
+	fc.loadOnce.Do(func() {
+		fc.family = canvas.NewFontFamily("Inter")
 		load := func(p string, s canvas.FontStyle) {
 			if d, err := os.ReadFile(p); err == nil {
-				_ = cachedFontFamily.LoadFont(d, 0, s)
+				if err := fc.family.LoadFont(d, 0, s); err != nil {
+					slog.Warn("Failed to load font", "path", p, "error", err)
+				}
+			} else {
+				slog.Warn("Failed to read font file", "path", p, "error", err)
 			}
 		}
 		load("assets/fonts/Inter-Regular.ttf", canvas.FontRegular)
 		load("assets/fonts/Inter-Bold.ttf", canvas.FontBold)
 	})
-	return &CanvasRenderer{items: items, config: config, family: cachedFontFamily}
+	return fc.family
 }
 
-func (r *CanvasRenderer) getFace(size float64, col color.Color, style canvas.FontStyle) *canvas.FontFace {
-	fontFaceMu.Lock()
-	defer fontFaceMu.Unlock()
+func (fc *FontCache) GetFace(size float64, col color.Color, style canvas.FontStyle) *canvas.FontFace {
+	fc.mu.Lock()
+	defer fc.mu.Unlock()
+
 	r1, g1, b1, a1 := col.RGBA()
 	key := fmt.Sprintf("%.2f-%d-%d-%d-%d-%d", size, style, r1, g1, b1, a1)
-	if face, ok := fontFaceCache[key]; ok {
+
+	if face, ok := fc.faces[key]; ok {
 		return face
 	}
-	face := r.family.Face(size, col, style, canvas.FontNormal)
-	fontFaceCache[key] = face
+
+	face := fc.GetFamily().Face(size, col, style, canvas.FontNormal)
+	fc.faces[key] = face
 	return face
 }
 
+type ImageCache struct {
+	mu     sync.RWMutex
+	images map[string]image.Image
+}
+
+func NewImageCache() *ImageCache {
+	return &ImageCache{
+		images: make(map[string]image.Image),
+	}
+}
+
+func (ic *ImageCache) Get(path string) (image.Image, bool) {
+	ic.mu.RLock()
+	defer ic.mu.RUnlock()
+	img, ok := ic.images[path]
+	return img, ok
+}
+
+func (ic *ImageCache) Set(path string, img image.Image) {
+	ic.mu.Lock()
+	defer ic.mu.Unlock()
+	ic.images[path] = img
+}
+
+type RendererCache struct {
+	Fonts  *FontCache
+	Images *ImageCache
+}
+
+func NewRendererCache() *RendererCache {
+	return &RendererCache{
+		Fonts:  NewFontCache(),
+		Images: NewImageCache(),
+	}
+}
+
+var globalRendererCache = NewRendererCache()
+
+func PreWarmRenderer() {
+	_ = globalRendererCache.Fonts.GetFamily()
+}
+
+type CanvasRenderer struct {
+	items  []RenderItem
+	config RenderConfig
+	cache  *RendererCache
+}
+
+func NewCanvasRenderer(config RenderConfig, items []RenderItem) *CanvasRenderer {
+	return &CanvasRenderer{
+		items:  items,
+		config: config,
+		cache:  globalRendererCache,
+	}
+}
+
+func NewCanvasRendererWithCache(config RenderConfig, items []RenderItem, cache *RendererCache) *CanvasRenderer {
+	return &CanvasRenderer{
+		items:  items,
+		config: config,
+		cache:  cache,
+	}
+}
+
+func (r *CanvasRenderer) getFace(size float64, col color.Color, style canvas.FontStyle) *canvas.FontFace {
+	return r.cache.Fonts.GetFace(size, col, style)
+}
+
 func (r *CanvasRenderer) getBackgroundImage(path string) image.Image {
-	imageCacheMu.RLock()
-	img, ok := backgroundImageCache[path]
-	imageCacheMu.RUnlock()
-	if ok {
+	if img, ok := r.cache.Images.Get(path); ok {
 		return img
 	}
+
 	f, err := os.Open(path)
 	if err != nil {
 		return nil
 	}
 	defer f.Close()
+
 	decoded, _, err := image.Decode(f)
 	if err != nil {
 		return nil
 	}
-	imageCacheMu.Lock()
-	backgroundImageCache[path] = decoded
-	imageCacheMu.Unlock()
+
+	r.cache.Images.Set(path, decoded)
 	return decoded
 }
 
@@ -252,7 +322,15 @@ func (r *CanvasRenderer) renderToContext(ctx *canvas.Context, width, height floa
 		yT := height - float64(r.config.TimeRowHeight) - float64(i*r.config.DayHeight)
 		yC := yT - (float64(r.config.DayHeight) / 2)
 		dayNames := []string{"MONTAG", "DIENSTAG", "MITTWOCH", "DONNERSTAG", "FREITAG", "SAMSTAG", "SONNTAG"}
-		ctx.DrawText(float64(r.config.DayColWidth)/2, yC-10, canvas.NewTextLine(fDay, dayNames[i%7], canvas.Center))
+		startIdx := 0
+		for idx, name := range dayNames {
+			if strings.ToUpper(r.config.StartDayName) == name {
+				startIdx = idx
+				break
+			}
+		}
+		dayName := dayNames[(startIdx+i)%7]
+		ctx.DrawText(float64(r.config.DayColWidth)/2, yC-10, canvas.NewTextLine(fDay, dayName, canvas.Center))
 		ctx.SetStrokeColor(r.config.Theme.GridColor)
 		ctx.SetStrokeWidth(2.0)
 		ctx.MoveTo(0, yT)
@@ -287,21 +365,26 @@ func (r *CanvasRenderer) renderToContext(ctx *canvas.Context, width, height floa
 		ctx.SetStrokeWidth(1.5)
 		ctx.DrawPath(xS, yB, cardPath)
 
-		fT := r.getFace(90.0*textScale, item.TextColor, canvas.FontBold)
+		fT := r.getFace(85.0*textScale, item.TextColor, canvas.FontBold)
 		fD := r.getFace(55.0*textScale, color.RGBA{R: item.TextColor.R, G: item.TextColor.G, B: item.TextColor.B, A: 215}, canvas.FontBold)
 		fS := r.getFace(45.0*textScale, color.RGBA{R: item.TextColor.R, G: item.TextColor.G, B: item.TextColor.B, A: 185}, canvas.FontRegular)
 
 		textPadding := 45.0
-		ctx.DrawText(xS+textPadding, yRowTop-110, canvas.NewTextLine(fT, item.Title, canvas.Left))
-		ctx.DrawText(xS+textPadding, yRowTop-195, canvas.NewTextLine(fD, item.Footer, canvas.Left))
-		ctx.DrawText(xS+textPadding, yRowTop-275, canvas.NewTextLine(fS, item.Subtitle, canvas.Left))
+		ctx.DrawText(xS+textPadding, yRowTop-90, canvas.NewTextLine(fT, item.Title, canvas.Left))
+		ctx.DrawText(xS+textPadding, yB+170, canvas.NewTextLine(fD, item.Room, canvas.Left))
+		ctx.DrawText(xS+textPadding, yB+100, canvas.NewTextLine(fS, item.Teacher, canvas.Left))
 
 		fTime := r.getFace(50.0*textScale, color.RGBA{R: item.TextColor.R, G: item.TextColor.G, B: item.TextColor.B, A: 230}, canvas.FontBold)
 		ctx.DrawText(xS+iW-40, yRowTop-90, canvas.NewTextLine(fTime, fmt.Sprintf("%02d:%02d", item.StartH, item.StartM), canvas.Right))
 
 		if item.Status != "REGULAR" && item.Status != "" {
 			fStat := r.getFace(40.0*textScale, r.config.Theme.StatusTextColor, canvas.FontBold)
-			ctx.DrawText(xS+iW-40, yB+45, canvas.NewTextLine(fStat, strings.ToUpper(item.Status), canvas.Right))
+
+			statusText := strings.ToUpper(item.Status)
+			if item.SubstitutionText != "" {
+				statusText = item.SubstitutionText
+			}
+			ctx.DrawText(xS+iW-40, yB+45, canvas.NewTextLine(fStat, statusText, canvas.Right))
 		}
 	}
 }

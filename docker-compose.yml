@@ -17,6 +17,9 @@ services:
       - DISCORD_TOKEN=${DISCORD_TOKEN}
       - TZ=Europe/Berlin
 
+      # Security
+      - ENCRYPTION_KEY=${ENCRYPTION_KEY:-default-32-byte-encryption!}
+
       # Database Configuration
       # Note: 'db' matches the service name below
       - DB_HOST=db
@@ -34,6 +37,8 @@ services:
       options:
         max-size: "10m"
         max-file: "3"
+    ports:
+      - "8080:8080"
 
   db:
     image: postgres:16-alpine

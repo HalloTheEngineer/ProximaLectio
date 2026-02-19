@@ -1,0 +1,6 @@
+bot
+.git
+.idea
+*.md
+.env
+*.tmp

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"proximaLectio/internal/constants"
 	"strings"
 	"time"
 
@@ -17,7 +18,7 @@ func (h *Handler) AutocompleteListener(e *events.AutocompleteInteractionCreate) 
 	switch e.Data.CommandName {
 	case "login":
 		go func() {
-			ctx, cancel := context.WithTimeout(context.Background(), TimeoutMedium)
+			ctx, cancel := context.WithTimeout(context.Background(), constants.TimeoutMedium)
 			defer cancel()
 
 			if err := e.AutocompleteResult(h.buildSchoolAutocomplete(ctx, e)); err != nil {

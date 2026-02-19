@@ -311,6 +311,44 @@ var (
 			Contexts: []dc.InteractionContextType{dc.InteractionContextTypeBotDM, dc.InteractionContextTypeGuild},
 		}, // EXAMS
 		dc.SlashCommandCreate{
+			Name:        "homework",
+			Description: "Shows your homework assignments.",
+			DescriptionLocalizations: map[dc.Locale]string{
+				dc.LocaleGerman: "Zeigt deine Hausaufgaben.",
+			},
+			Contexts: []dc.InteractionContextType{dc.InteractionContextTypeBotDM, dc.InteractionContextTypeGuild},
+			Options: []dc.ApplicationCommandOption{
+				dc.ApplicationCommandOptionInt{
+					Name:        "filter",
+					Description: "Filter homework by status.",
+					Required:    false,
+					Choices: []dc.ApplicationCommandOptionChoiceInt{
+						{
+							Name: "all",
+							NameLocalizations: map[dc.Locale]string{
+								dc.LocaleGerman: "alle",
+							},
+							Value: 0,
+						},
+						{
+							Name: "pending",
+							NameLocalizations: map[dc.Locale]string{
+								dc.LocaleGerman: "offen",
+							},
+							Value: 1,
+						},
+						{
+							Name: "completed",
+							NameLocalizations: map[dc.Locale]string{
+								dc.LocaleGerman: "erledigt",
+							},
+							Value: 2,
+						},
+					},
+				},
+			},
+		}, // HOMEWORK
+		dc.SlashCommandCreate{
 			Name:        "stats",
 			Description: "Shows your academic statistics and yearly progress.",
 			DescriptionLocalizations: map[dc.Locale]string{
