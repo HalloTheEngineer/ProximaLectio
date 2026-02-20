@@ -98,13 +98,18 @@ func (s *SyncService) SyncUserTimetable(ctx context.Context, id string, start, e
 				}
 			}
 
+			status := slot.Status
+			if status == "CHANGED" {
+				status = "SUBSTITUTION"
+			}
+
 			if user.NotificationsEnabled {
 				var oldStatus, oldTeacher, oldRoom string
 				checkQ := `SELECT status, teacher, room FROM timetable_entries WHERE user_id = $1 AND entry_date = $2 AND start_time = $3 AND subject = $4`
 				if err := s.db.QueryRowContext(ctx, checkQ, id, entryDate, startTime, subject).Scan(&oldStatus, &oldTeacher, &oldRoom); err == nil {
 					target := untis.NotificationTarget{Type: user.NotificationTarget, Address: user.NotificationAddress}
-					if oldStatus != slot.Status {
-						s.notifyHooks(ctx, id, target, subject, day.Date, "STATUS", oldStatus, slot.Status)
+					if oldStatus != status {
+						s.notifyHooks(ctx, id, target, subject, day.Date, "STATUS", oldStatus, status)
 					}
 					if teacher != "" && oldTeacher != "" && oldTeacher != teacher {
 						s.notifyHooks(ctx, id, target, subject, day.Date, "TEACHER", oldTeacher, teacher)
@@ -113,11 +118,6 @@ func (s *SyncService) SyncUserTimetable(ctx context.Context, id string, start, e
 						s.notifyHooks(ctx, id, target, subject, day.Date, "ROOM", oldRoom, room)
 					}
 				}
-			}
-
-			status := slot.Status
-			if status == "CHANGED" {
-				status = "SUBSTITUTION"
 			}
 
 			upsert := `
