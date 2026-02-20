@@ -228,8 +228,32 @@ func (h *Handler) handleSchedule(e *events.ApplicationCommandInteractionCreate, 
 		return
 	}
 
+	targetUserID := user.ID
+	targetThemeID := user.ThemeID
+
+	if targetUser, ok := data.OptUser("of"); ok {
+		if e.GuildID() == nil {
+			_ = e.CreateMessage(utils.GetWarnEmbed("The 'of' option can only be used in a server."))
+			return
+		}
+
+		targetMember, err := h.DB.Untis.GetGuildMemberByDiscordID(ctx, e.GuildID().String(), targetUser.ID.String())
+		if err != nil {
+			_ = e.CreateMessage(utils.GetWarnEmbed("That user is not registered in this server."))
+			return
+		}
+
+		targetUserID = targetMember.ID
+		targetUser, err := h.DB.Untis.GetUser(ctx, targetUserID)
+		if err != nil {
+			_ = e.CreateMessage(utils.GetErrorEmbed("Failed to fetch target user data.", err))
+			return
+		}
+		targetThemeID = targetUser.ThemeID
+	}
+
 	if e.GuildID() != nil {
-		h.safeSyncGuild(user.ID, e.GuildID().String())
+		h.safeSyncGuild(targetUserID, e.GuildID().String())
 	}
 
 	var periodStr string
@@ -260,7 +284,7 @@ func (h *Handler) handleSchedule(e *events.ApplicationCommandInteractionCreate, 
 		return
 	}
 
-	timetable, err := h.DB.Untis.GetTimetable(ctx, e.User().ID.String(), start, end)
+	timetable, err := h.DB.Untis.GetTimetable(ctx, targetUserID, start, end)
 	if err != nil {
 		_ = e.CreateMessage(utils.GetErrorEmbed("An error occurred while fetching timetable", err))
 		return
@@ -273,7 +297,7 @@ func (h *Handler) handleSchedule(e *events.ApplicationCommandInteractionCreate, 
 
 	_ = e.DeferCreateMessage(false)
 
-	image, err := h.DB.Untis.GenerateScheduleImage(timetable, dayCount, user.ThemeID)
+	image, err := h.DB.Untis.GenerateScheduleImage(timetable, dayCount, targetThemeID)
 	if err != nil {
 		_ = updateInteractionResp(h.Bot, e.Token(), utils.GetErrorUpdateEmbed("An error occurred while generating schedule", err))
 		return

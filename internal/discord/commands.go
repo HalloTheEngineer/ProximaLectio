@@ -84,6 +84,16 @@ var (
 				dc.LocaleGerman: "Zeigt den heutigen Stundenplan.",
 			},
 			Contexts: []dc.InteractionContextType{dc.InteractionContextTypeBotDM, dc.InteractionContextTypeGuild},
+			Options: []dc.ApplicationCommandOption{
+				dc.ApplicationCommandOptionUser{
+					Name:        "of",
+					Description: "View another user's schedule (must be registered in this server).",
+					DescriptionLocalizations: map[dc.Locale]string{
+						dc.LocaleGerman: "Zeige den Stundenplan eines anderen Nutzers.",
+					},
+					Required: false,
+				},
+			},
 		}, // TODAY
 		dc.SlashCommandCreate{
 			Name:        "tomorrow",
@@ -92,6 +102,16 @@ var (
 				dc.LocaleGerman: "Zeigt den morgigen Stundenplan.",
 			},
 			Contexts: []dc.InteractionContextType{dc.InteractionContextTypeBotDM, dc.InteractionContextTypeGuild},
+			Options: []dc.ApplicationCommandOption{
+				dc.ApplicationCommandOptionUser{
+					Name:        "of",
+					Description: "View another user's schedule (must be registered in this server).",
+					DescriptionLocalizations: map[dc.Locale]string{
+						dc.LocaleGerman: "Zeige den Stundenplan eines anderen Nutzers.",
+					},
+					Required: false,
+				},
+			},
 		}, // TOMORROW
 		dc.SlashCommandCreate{
 			Name:        "week",
@@ -127,6 +147,14 @@ var (
 							Value: "next",
 						},
 					},
+				},
+				dc.ApplicationCommandOptionUser{
+					Name:        "of",
+					Description: "View another user's schedule (must be registered in this server).",
+					DescriptionLocalizations: map[dc.Locale]string{
+						dc.LocaleGerman: "Zeige den Stundenplan eines anderen Nutzers.",
+					},
+					Required: false,
 				},
 			},
 		}, // WEEK

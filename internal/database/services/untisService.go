@@ -93,6 +93,14 @@ func (s *UntisService) IsChannelAllowed(ctx context.Context, guildID, channelID 
 	return s.Guild.IsChannelAllowed(ctx, guildID, channelID)
 }
 
+func (s *UntisService) GetGuildMembers(ctx context.Context, guildID string) ([]GuildMember, error) {
+	return s.Guild.GetGuildMembers(ctx, guildID)
+}
+
+func (s *UntisService) GetGuildMemberByDiscordID(ctx context.Context, guildID, discordID string) (*GuildMember, error) {
+	return s.Guild.GetGuildMemberByDiscordID(ctx, guildID, discordID)
+}
+
 func (s *UntisService) UpsertSchool(ctx context.Context, tenantID, schoolID int, loginName, displayName, server, address string) error {
 	err := s.School.UpsertSchool(ctx, tenantID, schoolID, loginName, displayName, server, address)
 	if err == nil {
