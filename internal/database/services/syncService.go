@@ -12,6 +12,7 @@ import (
 	api "proximaLectio/internal/untis"
 	"proximaLectio/internal/utils"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -194,17 +195,23 @@ func (s *SyncService) SyncUserAbsences(ctx context.Context, discordUserID string
 		endDate := parseUntisDateTime(a.EndDate, 0)
 		target := untis.NotificationTarget{Type: user.NotificationTarget, Address: user.NotificationAddress}
 
+		newStatus := strings.ToUpper(strings.TrimSpace(a.ExcuseStatus))
+		newReason := strings.TrimSpace(a.Reason)
+
 		if user.NotificationsEnabled {
 			var oldReason, oldStatus string
 			err := s.db.QueryRowContext(ctx, `SELECT reason, status FROM absences WHERE user_id = $1 AND untis_id = $2`, discordUserID, a.ID).Scan(&oldReason, &oldStatus)
 
+			oldStatusNormalized := strings.ToUpper(strings.TrimSpace(oldStatus))
+			oldReasonNormalized := strings.TrimSpace(oldReason)
+
 			if err != nil && !isInitialSync {
 				s.notifyHooks(ctx, discordUserID, target, "Absence", startDate.Format("02.01.2006"), "ABSENCE_NEW", "", a.Reason)
 			} else if err == nil {
-				if oldStatus != a.ExcuseStatus {
+				if oldStatusNormalized != newStatus {
 					s.notifyHooks(ctx, discordUserID, target, "Absence", startDate.Format("02.01.2006"), "ABSENCE_EXCUSED", oldStatus, a.ExcuseStatus)
 				}
-				if oldReason != a.Reason {
+				if oldReasonNormalized != newReason {
 					s.notifyHooks(ctx, discordUserID, target, "Absence", startDate.Format("02.01.2006"), "ABSENCE_REASON", oldReason, a.Reason)
 				}
 			}
