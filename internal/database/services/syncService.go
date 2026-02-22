@@ -185,7 +185,7 @@ func (s *SyncService) SyncUserAbsences(ctx context.Context, discordUserID string
 	}
 
 	var existingCount int
-	if err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM absences WHERE user_id = $1`, discordUserID).Scan(&existingCount); err != nil {
+	if err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM absences WHERE user_id = $1 AND start_date >= $2 AND end_date <= $3`, discordUserID, syncStart, syncEnd).Scan(&existingCount); err != nil {
 		slog.Warn("Failed to check existing absences count", "userID", discordUserID, "error", err)
 	}
 	isInitialSync := existingCount == 0
