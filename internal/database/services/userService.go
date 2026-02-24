@@ -31,12 +31,13 @@ func (s *UserService) GetUser(ctx context.Context, id string) (*untis.User, erro
 	var u untis.User
 	var target, address sql.NullString
 	var encryptedPassword string
+	var absencesSyncedAt sql.NullTime
 	query := `SELECT id, username, display_name, email, untis_school_tenant_id, untis_user, untis_password, untis_person_id, theme_id, 
-                      notifications_enabled, notification_target, notification_address 
+                      notifications_enabled, notification_target, notification_address, absences_synced_at
                FROM users WHERE id = $1`
 	err := s.db.QueryRowContext(ctx, query, id).Scan(
 		&u.ID, &u.Username, &u.DisplayName, &u.Email, &u.UntisSchoolID, &u.UntisUser, &encryptedPassword, &u.UntisPersonID, &u.ThemeID,
-		&u.NotificationsEnabled, &target, &address,
+		&u.NotificationsEnabled, &target, &address, &absencesSyncedAt,
 	)
 	if err != nil {
 		return nil, err
@@ -49,12 +50,15 @@ func (s *UserService) GetUser(ctx context.Context, id string) (*untis.User, erro
 
 	u.NotificationTarget = target.String
 	u.NotificationAddress = address.String
+	if absencesSyncedAt.Valid {
+		u.AbsencesSyncedAt = &absencesSyncedAt.Time
+	}
 	return &u, nil
 }
 
 func (s *UserService) GetAllUsers(ctx context.Context) ([]*untis.User, error) {
 	query := `SELECT id, username, display_name, email, untis_school_tenant_id, untis_user, untis_password, untis_person_id, theme_id, 
-                      notifications_enabled, notification_target, notification_address FROM users`
+                      notifications_enabled, notification_target, notification_address, absences_synced_at FROM users`
 	rows, err := s.db.QueryContext(ctx, query)
 	if err != nil {
 		return nil, err
@@ -66,9 +70,10 @@ func (s *UserService) GetAllUsers(ctx context.Context) ([]*untis.User, error) {
 		var u untis.User
 		var target, address sql.NullString
 		var encryptedPassword string
+		var absencesSyncedAt sql.NullTime
 		err := rows.Scan(
 			&u.ID, &u.Username, &u.DisplayName, &u.Email, &u.UntisSchoolID, &u.UntisUser, &encryptedPassword, &u.UntisPersonID, &u.ThemeID,
-			&u.NotificationsEnabled, &target, &address,
+			&u.NotificationsEnabled, &target, &address, &absencesSyncedAt,
 		)
 		if err != nil {
 			continue
@@ -76,6 +81,9 @@ func (s *UserService) GetAllUsers(ctx context.Context) ([]*untis.User, error) {
 		u.UntisPassword, _ = s.encryptor.Decrypt(encryptedPassword)
 		u.NotificationTarget = target.String
 		u.NotificationAddress = address.String
+		if absencesSyncedAt.Valid {
+			u.AbsencesSyncedAt = &absencesSyncedAt.Time
+		}
 		users = append(users, &u)
 	}
 	return users, nil
@@ -113,4 +121,9 @@ func (s *UserService) DeleteUser(ctx context.Context, id string) bool {
 		return false
 	}
 	return aff > 0
+}
+
+func (s *UserService) MarkAbsencesSynced(ctx context.Context, id string) error {
+	_, err := s.db.ExecContext(ctx, `UPDATE users SET absences_synced_at = NOW() WHERE id = $1`, id)
+	return err
 }

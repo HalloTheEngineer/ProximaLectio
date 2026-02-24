@@ -62,6 +62,19 @@ services:
       timeout: 5s
       retries: 5
 
+  pgadmin:
+    image: dpage/pgadmin4
+    container_name: proxima_lectio_pgadmin
+    ports:
+      - "5050:80"
+    restart: always
+    environment:
+      - PGADMIN_DEFAULT_EMAIL=${PGADMIN_EMAIL:-admin@admin.com}
+      - PGADMIN_DEFAULT_PASSWORD=${PGADMIN_PASSWORD:-admin}
+    volumes:
+      - pgadmin_data:/var/lib/pgadmin
+
 volumes:
   bot_data:
   pg_data:
+  pgadmin_data:

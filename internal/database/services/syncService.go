@@ -3,6 +3,7 @@ package services
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -107,8 +108,10 @@ func (s *SyncService) SyncUserTimetable(ctx context.Context, id string, start, e
 			if user.NotificationsEnabled {
 				var oldStatus, oldTeacher, oldRoom string
 				checkQ := `SELECT status, teacher, room FROM timetable_entries WHERE user_id = $1 AND entry_date = $2 AND start_time = $3 AND subject = $4`
-				if err := s.db.QueryRowContext(ctx, checkQ, id, entryDate, startTime, subject).Scan(&oldStatus, &oldTeacher, &oldRoom); err == nil {
-					target := untis.NotificationTarget{Type: user.NotificationTarget, Address: user.NotificationAddress}
+				err := s.db.QueryRowContext(ctx, checkQ, id, entryDate, startTime, subject).Scan(&oldStatus, &oldTeacher, &oldRoom)
+				target := untis.NotificationTarget{Type: user.NotificationTarget, Address: user.NotificationAddress}
+
+				if err == nil {
 					if oldStatus != status {
 						s.notifyHooks(ctx, id, target, subject, day.Date, "STATUS", oldStatus, status)
 					}
@@ -118,6 +121,8 @@ func (s *SyncService) SyncUserTimetable(ctx context.Context, id string, start, e
 					if room != "" && oldRoom != "" && oldRoom != room {
 						s.notifyHooks(ctx, id, target, subject, day.Date, "ROOM", oldRoom, room)
 					}
+				} else if errors.Is(err, sql.ErrNoRows) && status == "CANCELLED" {
+					s.notifyHooks(ctx, id, target, subject, day.Date, "STATUS", "REGULAR", status)
 				}
 			}
 
@@ -184,11 +189,7 @@ func (s *SyncService) SyncUserAbsences(ctx context.Context, discordUserID string
 		return err
 	}
 
-	var existingCount int
-	if err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM absences WHERE user_id = $1 AND start_date >= $2 AND end_date <= $3`, discordUserID, syncStart, syncEnd).Scan(&existingCount); err != nil {
-		slog.Warn("Failed to check existing absences count", "userID", discordUserID, "error", err)
-	}
-	isInitialSync := existingCount == 0
+	isInitialSync := user.AbsencesSyncedAt == nil
 
 	for _, a := range absences {
 		startDate := parseUntisDateTime(a.StartDate, 0)
@@ -227,6 +228,11 @@ func (s *SyncService) SyncUserAbsences(ctx context.Context, discordUserID string
 			slog.Error("Failed to upsert absence", "userID", discordUserID, "absenceID", a.ID, "error", err)
 		}
 	}
+
+	if err := s.userSvc.MarkAbsencesSynced(ctx, discordUserID); err != nil {
+		slog.Warn("Failed to mark absences as synced", "userID", discordUserID, "error", err)
+	}
+
 	return nil
 }
 

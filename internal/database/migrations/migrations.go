@@ -150,6 +150,13 @@ var migrations = []Migration{
 			CREATE INDEX IF NOT EXISTS idx_homeworks_user_due ON homeworks(user_id, due_date);
 		`,
 	},
+	{
+		Version: 6,
+		Name:    "add_absences_synced_at",
+		Up: `
+			ALTER TABLE users ADD COLUMN IF NOT EXISTS absences_synced_at TIMESTAMP;
+		`,
+	},
 }
 
 func Migrate(db *sql.DB) error {
