@@ -23,10 +23,10 @@ services:
       - HEALTH_PORT=${HEALTH_PORT:-8080}
 
       # Database Configuration
-      # For Coolify managed DB: Use the connection string from your managed database
+      # For Coolify managed DB: Set DB_CONNECTION_STRING in Coolify environment variables
       # Format: postgres://user:password@host:port/database?sslmode=require
-      # For self-hosted DB: Use postgres://untisuser:untispass@db:5432/untisdb?sslmode=disable
-      - DB_CONNECTION_STRING=${DB_CONNECTION_STRING}
+      # For self-hosted DB (default): Uses the db service below
+      - DB_CONNECTION_STRING=${DB_CONNECTION_STRING:-postgres://untisuser:untispass@db:5432/untisdb?sslmode=disable}
     volumes:
       - bot_data:/root/database
     healthcheck:
@@ -90,5 +90,5 @@ networks:
 
 volumes:
   bot_data:
-  # pg_data:  # Uncomment if using self-hosted DB
+  pg_data:
   pgadmin_data:
