@@ -1,0 +1,94 @@
+version: '3.8'
+
+services:
+  untis-bot:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: proxima_lectio
+    restart: always
+    networks:
+      - proxima-network
+    environment:
+      # Discord Configuration
+      - VERBOSE=${VERBOSE:-1}
+      - NO_COMMAND_UPDATE=${NO_COMMAND_UPDATE:-0}
+      - DISCORD_TOKEN=${DISCORD_TOKEN}
+      - TZ=Europe/Berlin
+
+      # Security
+      - ENCRYPTION_KEY=${ENCRYPTION_KEY:-default-32-byte-encryption!}
+
+      # Health Check Port
+      - HEALTH_PORT=${HEALTH_PORT:-8080}
+
+      # Database Configuration
+      # For Coolify managed DB: Use the connection string from your managed database
+      # Format: postgres://user:password@host:port/database?sslmode=require
+      # For self-hosted DB: Use postgres://untisuser:untispass@db:5432/untisdb?sslmode=disable
+      - DB_CONNECTION_STRING=${DB_CONNECTION_STRING}
+    volumes:
+      - bot_data:/root/database
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+#   Self-hosted PostgreSQL (disable if using Coolify managed DB)
+#   Uncomment the entire db service section below if you want to self-host
+  db:
+   image: postgres:16-alpine
+   container_name: proxima_lectio_db
+   restart: always
+   networks:
+     - proxima-network
+   environment:
+     - POSTGRES_USER=${DB_USER:-untisuser}
+     - POSTGRES_PASSWORD=${DB_PASSWORD:-untispass}
+     - POSTGRES_DB=${DB_NAME:-untisdb}
+   volumes:
+     - pg_data:/var/lib/postgresql/data
+   healthcheck:
+     test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-untisuser} -d ${DB_NAME:-untisdb}"]
+     interval: 5s
+     timeout: 5s
+     retries: 5
+
+  # pgAdmin - Database Management UI
+  # Accessible at http://your-server:5050
+  pgadmin:
+    image: dpage/pgadmin4:latest
+    container_name: proxima_lectio_pgadmin
+    restart: always
+    networks:
+      - proxima-network
+    ports:
+      - "5050:80"
+    environment:
+      - PGADMIN_DEFAULT_EMAIL=${PGADMIN_EMAIL:-admin@admin.com}
+      - PGADMIN_DEFAULT_PASSWORD=${PGADMIN_PASSWORD:-admin}
+      - PGADMIN_CONFIG_SERVER_MODE=False
+      - PGADMIN_CONFIG_MASTER_PASSWORD_REQUIRED=False
+    volumes:
+      - pgadmin_data:/var/lib/pgadmin
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:80/misc/ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+networks:
+  proxima-network:
+    driver: bridge
+
+volumes:
+  bot_data:
+  # pg_data:  # Uncomment if using self-hosted DB
+  pgadmin_data:
