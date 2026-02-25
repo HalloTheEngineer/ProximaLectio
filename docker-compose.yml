@@ -40,8 +40,6 @@ services:
     restart: always
     networks:
       - proxima-network
-    ports:
-      - "5432:5432"
     environment:
       POSTGRES_USER: ${DB_USER:-untisuser}
       POSTGRES_PASSWORD: ${DB_PASSWORD:-untispass}
@@ -54,28 +52,32 @@ services:
       timeout: 5s
       retries: 5
 
-  pgadmin:
-    image: dpage/pgadmin4:latest
-    container_name: proxima_lectio_pgadmin
+  metabase:
+    image: metabase/metabase:latest
+    container_name: proxima_lectio_metabase
     restart: always
     networks:
       - proxima-network
     ports:
-      - "5050:80"
+      - "3000:3000"
     environment:
-      PGADMIN_DEFAULT_EMAIL: ${PGADMIN_EMAIL:-admin@admin.com}
-      PGADMIN_DEFAULT_PASSWORD: ${PGADMIN_PASSWORD:-admin}
-      PGADMIN_CONFIG_SERVER_MODE: 'False'
-      PGADMIN_CONFIG_MASTER_PASSWORD_REQUIRED: 'False'
-    volumes:
-      - pgadmin_data:/var/lib/pgadmin
+      MB_DB_TYPE: postgres
+      MB_DB_DBNAME: ${DB_NAME:-untisdb}
+      MB_DB_PORT: 5432
+      MB_DB_USER: ${DB_USER:-untisuser}
+      MB_DB_PASS: ${DB_PASSWORD:-untispass}
+      MB_DB_HOST: db
+      MB_ENCRYPTION_SECRET_KEY: ${METABASE_SECRET_KEY:-your-32-char-encryption-key-for-metabase}
     depends_on:
       - db
+    volumes:
+      - metabase_data:/metabase-data
     healthcheck:
-      test: ["CMD", "wget", "--spider", "-q", "http://localhost:80/misc/ping"]
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:3000/api/health"]
       interval: 30s
       timeout: 10s
-      retries: 3
+      retries: 5
+      start_period: 60s
 
 networks:
   proxima-network:
@@ -84,4 +86,4 @@ networks:
 volumes:
   bot_data:
   pg_data:
-  pgadmin_data:
+  metabase_data:
