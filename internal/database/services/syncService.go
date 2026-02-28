@@ -190,10 +190,16 @@ func (s *SyncService) SyncUserAbsences(ctx context.Context, discordUserID string
 	}
 
 	isInitialSync := user.AbsencesSyncedAt == nil
+	cutoffDate := time.Now().AddDate(0, 0, -90) // Skip absences older than 90 days
 
 	for _, a := range absences {
 		startDate := parseUntisDateTime(a.StartDate, 0)
 		endDate := parseUntisDateTime(a.EndDate, 0)
+
+		// Skip old absences to prevent alerts for historical data
+		if endDate.Before(cutoffDate) {
+			continue
+		}
 		target := untis.NotificationTarget{Type: user.NotificationTarget, Address: user.NotificationAddress}
 
 		newStatus := strings.ToUpper(strings.TrimSpace(a.ExcuseStatus))
