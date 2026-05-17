@@ -327,6 +327,10 @@ func (s *UntisService) GenerateExcusePDF(ctx context.Context, userID string, unt
 	return s.SyncSvc.GenerateExcusePDF(ctx, userID, untisID, guardian)
 }
 
+func (s *UntisService) GenerateAllOpenExcusesPDF(ctx context.Context, userID string, guardian string) (io.Reader, error) {
+	return s.SyncSvc.GenerateAllOpenExcusesPDF(ctx, userID, guardian)
+}
+
 func (s *UntisService) GetThemes(filter string) ([]*string, error) {
 	return s.Theme.GetThemes(filter)
 }

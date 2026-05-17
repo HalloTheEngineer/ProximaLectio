@@ -666,6 +666,54 @@ func (s *SyncService) GenerateExcusePDF(ctx context.Context, userID string, unti
 		return nil, fmt.Errorf("absence not found in database: %w", err)
 	}
 
+	data, err := s.buildExcuseData(ctx, user, untisID, start, end, startTimeInt, endTimeInt, reason, guardian)
+	if err != nil {
+		return nil, err
+	}
+
+	renderer := NewPDFRenderer()
+	return renderer.RenderExcuse(data)
+}
+
+func (s *SyncService) GenerateAllOpenExcusesPDF(ctx context.Context, userID string, guardian string) (io.Reader, error) {
+	user, err := s.userSvc.GetUser(ctx, userID)
+	if err != nil {
+		return nil, err
+	}
+
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT untis_id, start_date, end_date, start_time, end_time, reason FROM absences WHERE user_id = $1 AND is_excused = FALSE ORDER BY start_date DESC`,
+		userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var data []ExcuseData
+	for rows.Next() {
+		var untisID int
+		var start, end time.Time
+		var startTimeInt, endTimeInt int
+		var reason string
+		if err := rows.Scan(&untisID, &start, &end, &startTimeInt, &endTimeInt, &reason); err != nil {
+			return nil, err
+		}
+		d, err := s.buildExcuseData(ctx, user, untisID, start, end, startTimeInt, endTimeInt, reason, guardian)
+		if err != nil {
+			return nil, err
+		}
+		data = append(data, d)
+	}
+
+	if len(data) == 0 {
+		return nil, fmt.Errorf("no unexcused absences found")
+	}
+
+	renderer := NewPDFRenderer()
+	return renderer.RenderExcuseList(data)
+}
+
+func (s *SyncService) buildExcuseData(ctx context.Context, user *untis.User, untisID int, start, end time.Time, startTimeInt, endTimeInt int, reason string, guardian string) (ExcuseData, error) {
 	dateRange := start.Format("02.01.2006")
 	if !start.Equal(end) {
 		dateRange = fmt.Sprintf("%s bis %s", dateRange, end.Format("02.01.2006"))
@@ -680,7 +728,7 @@ func (s *SyncService) GenerateExcusePDF(ctx context.Context, userID string, unti
 		city = school.Address
 	}
 
-	data := ExcuseData{
+	return ExcuseData{
 		StudentName:    formatUntisName(user.DisplayName),
 		StudentID:      user.UntisPersonID,
 		DateRange:      dateRange,
@@ -691,10 +739,7 @@ func (s *SyncService) GenerateExcusePDF(ctx context.Context, userID string, unti
 		SubmissionDate: time.Now().Format("02.01.2006"),
 		ReferenceID:    fmt.Sprintf("%d-ABS-%d", user.UntisPersonID, untisID),
 		Guardian:       guardian,
-	}
-
-	renderer := NewPDFRenderer()
-	return renderer.RenderExcuse(data)
+	}, nil
 }
 
 func (s *SyncService) mapTimetableToItems(timetable *api.TimetableEntry, theme Theme) []RenderItem {

@@ -408,13 +408,17 @@ var (
 		}, // COMMON
 		dc.SlashCommandCreate{
 			Name:        "excuse",
-			Description: "Generates a formal PDF excuse for a specific absence.",
+			Description: "Generates a formal PDF excuse for a specific absence or all open absences.",
 			Options: []dc.ApplicationCommandOption{
 				dc.ApplicationCommandOptionInt{
 					Name:         "id",
-					Description:  "Select the absence from the list",
-					Required:     true,
+					Description:  "Select a specific absence (leave empty if using 'all')",
+					Required:     false,
 					Autocomplete: true,
+				},
+				dc.ApplicationCommandOptionBool{
+					Name:        "all",
+					Description: "Generate excuses for ALL unexcused absences at once",
 				},
 				dc.ApplicationCommandOptionString{
 					Name:        "guardian",

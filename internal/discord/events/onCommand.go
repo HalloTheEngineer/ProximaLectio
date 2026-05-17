@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"proximaLectio/internal/constants"
 	"proximaLectio/internal/database/models/untis"
@@ -930,12 +931,18 @@ func (h *Handler) handleTheme(e *events.ApplicationCommandInteractionCreate) {
 func (h *Handler) handleExcuse(e *events.ApplicationCommandInteractionCreate) {
 	data := e.SlashCommandInteractionData()
 
-	absenceID, ok := data.OptInt("id")
-	if !ok {
-		_ = e.CreateMessage(utils.GetWarnEmbed("Please provide a valid Absence ID. Start typing in the 'id' field to see your recent absences."))
+	absenceID, hasID := data.OptInt("id")
+	_, hasAll := data.OptBool("all")
+	guardian := data.String("guardian")
+
+	if !hasID && !hasAll {
+		_ = e.CreateMessage(utils.GetWarnEmbed("Please provide an absence `id` or set `all` to true."))
 		return
 	}
-	guardian := data.String("guardian")
+	if hasID && hasAll {
+		_ = e.CreateMessage(utils.GetWarnEmbed("Please provide either an `id` or `all`, not both."))
+		return
+	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), constants.TimeoutLong)
 	defer cancel()
@@ -951,13 +958,26 @@ func (h *Handler) handleExcuse(e *events.ApplicationCommandInteractionCreate) {
 		return
 	}
 
-	pdfReader, err := h.DB.Untis.GenerateExcusePDF(ctx, e.User().ID.String(), absenceID, guardian)
-	if err != nil {
-		_, _ = b.Rest().UpdateInteractionResponse(e.ApplicationID(), e.Token(), utils.GetErrorUpdateEmbed("Failed to generate the excuse document. Make sure you selected a valid absence.", err))
-		return
+	var pdfReader io.Reader
+	var fileName string
+	var err error
+
+	if hasAll {
+		pdfReader, err = h.DB.Untis.GenerateAllOpenExcusesPDF(ctx, e.User().ID.String(), guardian)
+		if err != nil {
+			_, _ = b.Rest().UpdateInteractionResponse(e.ApplicationID(), e.Token(), utils.GetErrorUpdateEmbed("Failed to generate excuses. Make sure you have unexcused absences.", err))
+			return
+		}
+		fileName = "Entschuldigungen.pdf"
+	} else {
+		pdfReader, err = h.DB.Untis.GenerateExcusePDF(ctx, e.User().ID.String(), absenceID, guardian)
+		if err != nil {
+			_, _ = b.Rest().UpdateInteractionResponse(e.ApplicationID(), e.Token(), utils.GetErrorUpdateEmbed("Failed to generate the excuse document. Make sure you selected a valid absence.", err))
+			return
+		}
+		fileName = fmt.Sprintf("Entschuldigung_%d.pdf", absenceID)
 	}
 
-	fileName := fmt.Sprintf("Entschuldigung_%d.pdf", absenceID)
 	attachment := discord.NewFile(fileName, "", pdfReader)
 
 	_, err = b.Rest().UpdateInteractionResponse(e.ApplicationID(), e.Token(),
