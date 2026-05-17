@@ -41,138 +41,281 @@ type ExcuseData struct {
 }
 
 func (r *PDFRenderer) RenderExcuse(data ExcuseData) (io.Reader, error) {
-	return r.RenderExcuseList([]ExcuseData{data})
+	m := maroto.New()
+
+	m.AddRows(
+		row.New(8).Add(
+			col.New(12).Add(
+				text.New(data.StudentName, props.Text{Size: 11, Style: fontstyle.Bold, Align: align.Left}),
+			),
+		),
+		row.New(6).Add(
+			col.New(12).Add(
+				text.New(fmt.Sprintf("Student ID: %d", data.StudentID), props.Text{Size: 9, Align: align.Left}),
+			),
+		),
+
+		row.New(10),
+
+		row.New(8).Add(
+			col.New(12).Add(
+				text.New(fmt.Sprintf("%s, den %s", data.City, data.SubmissionDate), props.Text{Size: 10, Align: align.Right}),
+			),
+		),
+
+		row.New(15),
+
+		row.New(10).Add(
+			col.New(12).Add(
+				text.New("Entschuldigung für das Fernbleiben vom Unterricht", props.Text{Size: 13, Style: fontstyle.Bold}),
+			),
+		),
+		row.New(4).Add(
+			col.New(12).Add(
+				line.New(props.Line{
+					Thickness:     0.5,
+					Orientation:   orientation.Horizontal,
+					SizePercent:   100,
+					OffsetPercent: 0,
+				}),
+			),
+		),
+
+		row.New(10),
+
+		row.New(8).Add(
+			col.New(12).Add(
+				text.New("Sehr geehrte Damen und Herren,", props.Text{Size: 10}),
+			),
+		),
+
+		row.New(6),
+
+		row.New(10).Add(
+			col.New(12).Add(
+				text.New(fmt.Sprintf("hiermit möchte ich mein Fernbleiben vom Unterricht im Zeitraum vom %s (%s - %s Uhr) entschuldigen.", data.DateRange, data.StartTime, data.EndTime), props.Text{Size: 10}),
+			),
+		),
+
+		row.New(6),
+
+		row.New(6).Add(
+			col.New(12).Add(
+				text.New("Der Grund für meine Abwesenheit war:", props.Text{Size: 10}),
+			),
+		),
+		row.New(8).Add(
+			col.New(12).Add(
+				text.New(fmt.Sprintf("\"%s\"", data.Reason), props.Text{Size: 10, Style: fontstyle.Italic}),
+			),
+		),
+
+		row.New(6),
+
+		row.New(8).Add(
+			col.New(12).Add(
+				text.New("Ich bitte Sie, mein Fehlen als entschuldigt zu markieren.", props.Text{Size: 10}),
+			),
+		),
+
+		row.New(10),
+
+		row.New(8).Add(
+			col.New(12).Add(
+				func() core.Component {
+					closing := "Mit freundlichen Grüßen,"
+					if data.Guardian != "" {
+						closing = fmt.Sprintf("Mit freundlichen Grüßen, %s", data.StudentName)
+					}
+					return text.New(closing, props.Text{Size: 10})
+				}(),
+			),
+		),
+
+		row.New(20),
+
+		row.New(2).Add(
+			col.New(5).Add(
+				line.New(props.Line{
+					Thickness:     0.3,
+					Orientation:   orientation.Horizontal,
+					SizePercent:   100,
+					OffsetPercent: 0,
+				}),
+			),
+		),
+		row.New(8).Add(
+			col.New(5).Add(
+				func() core.Component {
+					name := data.StudentName
+					if data.Guardian != "" {
+						name = data.Guardian + " (Erziehungsberechtigte/r)"
+					}
+					return text.New(name, props.Text{Size: 10, Style: fontstyle.Bold})
+				}(),
+			),
+		),
+
+		row.New(30),
+
+		row.New(4).Add(
+			col.New(12).Add(
+				line.New(props.Line{
+					Thickness:     0.2,
+					Orientation:   orientation.Horizontal,
+					SizePercent:   100,
+					OffsetPercent: 0,
+				}),
+			),
+		),
+		row.New(6).Add(
+			col.New(12).Add(
+				text.New("Dieses Dokument wurde automatisch erstellt von ProximaLectio (WebUntis Discord Bot).", props.Text{Size: 6}),
+			),
+		),
+		row.New(6).Add(
+			col.New(12).Add(
+				text.New(fmt.Sprintf("Referenz-ID: %s", data.ReferenceID), props.Text{Size: 6}),
+			),
+		),
+	)
+
+	doc, err := m.Generate()
+	if err != nil {
+		return nil, fmt.Errorf("failed to generate PDF document: %w", err)
+	}
+
+	return bytes.NewReader(doc.GetBytes()), nil
 }
 
 func (r *PDFRenderer) RenderExcuseList(data []ExcuseData) (io.Reader, error) {
 	m := maroto.New()
+	first := data[0]
 
-	for i, d := range data {
-		if i > 0 {
-			m.AddRows(row.New(10))
-		}
+	m.AddRows(
+		row.New(8).Add(
+			col.New(12).Add(
+				text.New(first.StudentName, props.Text{Size: 11, Style: fontstyle.Bold, Align: align.Left}),
+			),
+		),
+		row.New(6).Add(
+			col.New(12).Add(
+				text.New(fmt.Sprintf("Student ID: %d", first.StudentID), props.Text{Size: 9, Align: align.Left}),
+			),
+		),
 
+		row.New(10),
+
+		row.New(8).Add(
+			col.New(12).Add(
+				text.New(fmt.Sprintf("%s, den %s", first.City, first.SubmissionDate), props.Text{Size: 10, Align: align.Right}),
+			),
+		),
+
+		row.New(15),
+
+		row.New(10).Add(
+			col.New(12).Add(
+				text.New("Entschuldigung für das Fernbleiben vom Unterricht", props.Text{Size: 13, Style: fontstyle.Bold}),
+			),
+		),
+		row.New(4).Add(
+			col.New(12).Add(
+				line.New(props.Line{
+					Thickness:     0.5,
+					Orientation:   orientation.Horizontal,
+					SizePercent:   100,
+					OffsetPercent: 0,
+				}),
+			),
+		),
+
+		row.New(10),
+
+		row.New(8).Add(
+			col.New(12).Add(
+				text.New("Sehr geehrte Damen und Herren,", props.Text{Size: 10}),
+			),
+		),
+
+		row.New(6),
+
+		row.New(10).Add(
+			col.New(12).Add(
+				text.New("hiermit möchte ich mein Fernbleiben vom Unterricht an folgenden Tagen entschuldigen:", props.Text{Size: 10}),
+			),
+		),
+
+		row.New(6),
+	)
+
+	for _, d := range data {
+		bullet := fmt.Sprintf("  \u2022 %s (%s - %s Uhr) \u2014 \"%s\"", d.DateRange, d.StartTime, d.EndTime, d.Reason)
 		m.AddRows(
 			row.New(8).Add(
 				col.New(12).Add(
-					text.New(d.StudentName, props.Text{Size: 11, Style: fontstyle.Bold, Align: align.Left}),
-				),
-			),
-			row.New(6).Add(
-				col.New(12).Add(
-					text.New(fmt.Sprintf("Student ID: %d", d.StudentID), props.Text{Size: 9, Align: align.Left}),
-				),
-			),
-
-			row.New(10),
-
-			row.New(8).Add(
-				col.New(12).Add(
-					text.New(fmt.Sprintf("%s, den %s", d.City, d.SubmissionDate), props.Text{Size: 10, Align: align.Right}),
-				),
-			),
-
-			row.New(15),
-
-			row.New(10).Add(
-				col.New(12).Add(
-					text.New("Entschuldigung für das Fernbleiben vom Unterricht", props.Text{Size: 13, Style: fontstyle.Bold}),
-				),
-			),
-			row.New(4).Add(
-				col.New(12).Add(
-					line.New(props.Line{
-						Thickness:     0.5,
-						Orientation:   orientation.Horizontal,
-						SizePercent:   100,
-						OffsetPercent: 0,
-					}),
-				),
-			),
-
-			row.New(10),
-
-			row.New(8).Add(
-				col.New(12).Add(
-					text.New("Sehr geehrte Damen und Herren,", props.Text{Size: 10}),
-				),
-			),
-
-			row.New(6),
-
-			row.New(10).Add(
-				col.New(12).Add(
-					text.New(fmt.Sprintf("hiermit möchte ich mein Fernbleiben vom Unterricht im Zeitraum vom %s (%s - %s Uhr) entschuldigen.", d.DateRange, d.StartTime, d.EndTime), props.Text{Size: 10}),
-				),
-			),
-
-			row.New(6),
-
-			row.New(6).Add(
-				col.New(12).Add(
-					text.New("Der Grund für meine Abwesenheit war:", props.Text{Size: 10}),
-				),
-			),
-			row.New(8).Add(
-				col.New(12).Add(
-					text.New(fmt.Sprintf("\"%s\"", d.Reason), props.Text{Size: 10, Style: fontstyle.Italic}),
-				),
-			),
-
-			row.New(6),
-
-			row.New(8).Add(
-				col.New(12).Add(
-					text.New("Ich bitte Sie, mein Fehlen als entschuldigt zu markieren.", props.Text{Size: 10}),
-				),
-			),
-
-			row.New(10),
-
-			row.New(8).Add(
-				col.New(12).Add(
-					func() core.Component {
-						closing := "Mit freundlichen Grüßen,"
-						if d.Guardian != "" {
-							closing = fmt.Sprintf("Mit freundlichen Grüßen, %s", d.StudentName)
-						}
-						return text.New(closing, props.Text{Size: 10})
-					}(),
-				),
-			),
-
-			row.New(20),
-
-			row.New(2).Add(
-				col.New(5).Add(
-					line.New(props.Line{
-						Thickness:     0.3,
-						Orientation:   orientation.Horizontal,
-						SizePercent:   100,
-						OffsetPercent: 0,
-					}),
-				),
-			),
-			row.New(8).Add(
-				col.New(5).Add(
-					func() core.Component {
-						name := d.StudentName
-						if d.Guardian != "" {
-							name = d.Guardian + " (Erziehungsberechtigte/r)"
-						}
-						return text.New(name, props.Text{Size: 10, Style: fontstyle.Bold})
-					}(),
+					text.New(bullet, props.Text{Size: 10}),
 				),
 			),
 		)
 	}
 
-	footerRef := fmt.Sprintf("Referenz-ID(s): %s", data[len(data)-1].ReferenceID)
+	footerRef := fmt.Sprintf("Referenz-ID: %s", data[0].ReferenceID)
 	if len(data) > 1 {
-		footerRef = fmt.Sprintf("Referenz-ID(s): %d Absenzen (%s, ...)", len(data), data[0].ReferenceID)
+		refs := make([]string, len(data))
+		for i, d := range data {
+			refs[i] = d.ReferenceID
+		}
+		footerRef = fmt.Sprintf("Referenz-ID(s): %s", strings.Join(refs, ", "))
 	}
 
 	m.AddRows(
+		row.New(6),
+
+		row.New(8).Add(
+			col.New(12).Add(
+				text.New("Ich bitte Sie, mein Fehlen als entschuldigt zu markieren.", props.Text{Size: 10}),
+			),
+		),
+
+		row.New(10),
+
+		row.New(8).Add(
+			col.New(12).Add(
+				func() core.Component {
+					closing := "Mit freundlichen Grüßen,"
+					if first.Guardian != "" {
+						closing = fmt.Sprintf("Mit freundlichen Grüßen, %s", first.StudentName)
+					}
+					return text.New(closing, props.Text{Size: 10})
+				}(),
+			),
+		),
+
+		row.New(20),
+
+		row.New(2).Add(
+			col.New(5).Add(
+				line.New(props.Line{
+					Thickness:     0.3,
+					Orientation:   orientation.Horizontal,
+					SizePercent:   100,
+					OffsetPercent: 0,
+				}),
+			),
+		),
+		row.New(8).Add(
+			col.New(5).Add(
+				func() core.Component {
+					name := first.StudentName
+					if first.Guardian != "" {
+						name = first.Guardian + " (Erziehungsberechtigte/r)"
+					}
+					return text.New(name, props.Text{Size: 10, Style: fontstyle.Bold})
+				}(),
+			),
+		),
+
 		row.New(30),
 
 		row.New(4).Add(
