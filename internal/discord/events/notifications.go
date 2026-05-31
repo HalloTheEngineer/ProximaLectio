@@ -54,7 +54,7 @@ func (h *Handler) RegisterNotificationHooks() {
 
 		case "HOMEWORK_DUE":
 			title = "📚 Homework Due Tomorrow"
-			description = fmt.Sprintf("You have homework due tomorrow (**%s**) for **%s**:\n\n> %s", date, subject, new)
+			description = fmt.Sprintf("You have homework due tomorrow (**%s**) for **%s**:\n\n> %s", date, subject, strings.ReplaceAll(new, "\n", "\n> "))
 			color = 0xF1C40F
 		}
 
