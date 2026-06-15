@@ -84,7 +84,7 @@ func (s *SyncService) SyncUserTimetable(ctx context.Context, id string, start, e
 			endTime := fmt.Sprintf("%02d:%02d:00", eH, eM)
 
 			var subject, teacher, room string
-			allPositions := [][]api.Position{slot.Position1, slot.Position2, slot.Position3, slot.Position4}
+			allPositions := [][]api.Position{slot.Position1, slot.Position2, slot.Position3, slot.Position4, slot.Position5, slot.Position6, slot.Position7}
 			for _, list := range allPositions {
 				for _, pos := range list {
 					if pos.Current != nil {

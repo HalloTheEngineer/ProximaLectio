@@ -38,6 +38,7 @@ func StartSyncWorker(ctx context.Context, s *UntisService, syncSpec string, home
 		}
 	}
 
+	scheduler.SingletonMode()
 	scheduler.StartAsync()
 	slog.Info("Gocron sync worker started", "sync_schedule", syncSpec, "homework_schedule", homeworkSpec, "cleanup_schedule", cleanupSpec)
 
