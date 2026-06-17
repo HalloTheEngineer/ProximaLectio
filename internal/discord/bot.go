@@ -2,12 +2,13 @@ package discord
 
 import (
 	"context"
-	"log"
 	"log/slog"
+	"math"
 	"proximaLectio/internal/config"
 	"proximaLectio/internal/database"
 	"proximaLectio/internal/database/services"
 	"proximaLectio/internal/discord/events"
+	"time"
 
 	"github.com/disgoorg/disgo"
 	"github.com/disgoorg/disgo/bot"
@@ -16,7 +17,13 @@ import (
 	"github.com/disgoorg/disgo/gateway"
 )
 
-func Launch(db *database.DB, cfg *config.Config) bot.Client {
+const (
+	maxConnectAttempts = 8
+	baseRetryDelay     = 2 * time.Second
+	maxRetryDelay      = 5 * time.Minute
+)
+
+func Launch(ctx context.Context, db *database.DB, cfg *config.Config) bot.Client {
 	h := events.NewHandler(db, cfg)
 
 	go func() {
@@ -30,7 +37,6 @@ func Launch(db *database.DB, cfg *config.Config) bot.Client {
 			gateway.WithIntents(
 				gateway.IntentGuilds,
 				gateway.IntentGuildMessages,
-				// gateway.IntentMessageContent,
 			),
 			gateway.WithPresenceOpts(
 				gateway.WithPlayingActivity("Untis"),
@@ -50,7 +56,7 @@ func Launch(db *database.DB, cfg *config.Config) bot.Client {
 		),
 	)
 	if err != nil {
-		log.Fatalf("Failed to initialize Disgo client: %v", err)
+		slog.Error("Failed to initialize Disgo client", "error", err)
 		return nil
 	}
 
@@ -62,8 +68,8 @@ func Launch(db *database.DB, cfg *config.Config) bot.Client {
 		}
 	}
 
-	if err = client.OpenGateway(context.Background()); err != nil {
-		log.Fatalf("Failed to open gateway: %v", err)
+	if err = openGatewayWithRetry(ctx, client); err != nil {
+		slog.Error("Failed to open gateway after all retries", "error", err)
 		return nil
 	}
 
@@ -74,4 +80,33 @@ func Launch(db *database.DB, cfg *config.Config) bot.Client {
 	slog.Info("(✓) Discord Bot Connected to Gateway")
 
 	return client
+}
+
+func openGatewayWithRetry(ctx context.Context, client bot.Client) error {
+	var lastErr error
+	for attempt := 1; attempt <= maxConnectAttempts; attempt++ {
+		slog.Info("Opening Discord gateway", "attempt", attempt, "max", maxConnectAttempts)
+
+		lastErr = client.OpenGateway(ctx)
+		if lastErr == nil {
+			return nil
+		}
+
+		slog.Warn("Gateway connection failed", "attempt", attempt, "error", lastErr)
+
+		delay := time.Duration(math.Min(
+			float64(baseRetryDelay)*math.Pow(2, float64(attempt-1)),
+			float64(maxRetryDelay),
+		))
+
+		slog.Info("Retrying gateway connection", "delay", delay.Round(time.Second))
+
+		select {
+		case <-time.After(delay):
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}
+
+	return lastErr
 }

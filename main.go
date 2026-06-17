@@ -34,7 +34,7 @@ func main() {
 	services.StartSyncWorker(ctx, db.Untis, constants.ScheduleSyncCron, constants.HomeworkAlertCron, constants.CleanupCron)
 
 	go func() {
-		client := discord.Launch(db, cfg)
+		client := discord.Launch(ctx, db, cfg)
 
 		<-ctx.Done()
 		if client != nil {
