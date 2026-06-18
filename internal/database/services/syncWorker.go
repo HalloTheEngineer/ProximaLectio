@@ -12,6 +12,7 @@ import (
 func StartSyncWorker(ctx context.Context, s *UntisService, syncSpec string, homeworkSpec string, cleanupSpec string) {
 	scheduler := gocron.NewScheduler(time.Local)
 
+	slog.Info("Registering sync job", "cron", syncSpec)
 	_, err := scheduler.Cron(syncSpec).Do(func() {
 		slog.Info("Starting scheduled general sync cycle")
 		runGeneralSync(ctx, s)
@@ -20,6 +21,7 @@ func StartSyncWorker(ctx context.Context, s *UntisService, syncSpec string, home
 		slog.Error("Failed to schedule general sync job", "error", err)
 	}
 
+	slog.Info("Registering homework alert job", "cron", homeworkSpec)
 	_, err = scheduler.Cron(homeworkSpec).Do(func() {
 		slog.Info("Starting scheduled daily homework alert check")
 		runHomeworkCheck(ctx, s)
@@ -29,6 +31,7 @@ func StartSyncWorker(ctx context.Context, s *UntisService, syncSpec string, home
 	}
 
 	if cleanupSpec != "" {
+		slog.Info("Registering cleanup job", "cron", cleanupSpec)
 		_, err = scheduler.Cron(cleanupSpec).Do(func() {
 			slog.Info("Starting scheduled data cleanup")
 			runCleanup(ctx, s)

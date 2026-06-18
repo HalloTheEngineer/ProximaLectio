@@ -11,6 +11,7 @@ import (
 	"proximaLectio/internal/database/services"
 	"proximaLectio/internal/discord"
 	"proximaLectio/internal/health"
+	"runtime/debug"
 	"syscall"
 	"time"
 )
@@ -22,6 +23,8 @@ func main() {
 		slog.SetLogLoggerLevel(slog.LevelDebug)
 	}
 
+	slog.Info("Starting ProximaLectio...")
+
 	db := database.Connect(cfg)
 	defer db.Close()
 
@@ -31,9 +34,18 @@ func main() {
 	healthChecker := health.NewChecker(db.RawDB(), cfg.HealthPort)
 	healthChecker.Start()
 
+	slog.Info("Starting sync worker...")
 	services.StartSyncWorker(ctx, db.Untis, constants.ScheduleSyncCron, constants.HomeworkAlertCron, constants.CleanupCron)
+	slog.Info("(✓) Sync worker started")
 
+	slog.Info("Launching Discord client...")
 	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				slog.Error("Discord client panicked", "recover", r, "stack", string(debug.Stack()))
+			}
+		}()
+
 		client := discord.Launch(ctx, db, cfg)
 
 		<-ctx.Done()
