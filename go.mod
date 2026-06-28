@@ -6,7 +6,7 @@ require (
 	github.com/disgoorg/disgo v0.18.16
 	github.com/disgoorg/json v1.2.0
 	github.com/disgoorg/snowflake/v2 v2.0.3
-	github.com/go-co-op/gocron v1.37.0
+	github.com/go-co-op/gocron v1.35.3
 	github.com/johnfercher/maroto/v2 v2.3.3
 	github.com/lib/pq v1.11.1
 	github.com/tdewolff/canvas v0.0.0-20260129132952-fb83307db4c6
