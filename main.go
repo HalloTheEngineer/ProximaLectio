@@ -35,7 +35,14 @@ func main() {
 	healthChecker.Start()
 
 	slog.Info("Starting sync worker...")
-	services.StartSyncWorker(ctx, db.Untis, constants.ScheduleSyncCron, constants.HomeworkAlertCron, constants.CleanupCron)
+	func() {
+		defer func() {
+			if r := recover(); r != nil {
+				slog.Error("PANIC in StartSyncWorker", "recover", r, "stack", string(debug.Stack()))
+			}
+		}()
+		services.StartSyncWorker(ctx, db.Untis, constants.ScheduleSyncCron, constants.HomeworkAlertCron, constants.CleanupCron)
+	}()
 	slog.Info("(✓) Sync worker started")
 
 	slog.Info("Launching Discord client...")

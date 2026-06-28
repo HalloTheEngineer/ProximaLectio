@@ -41,9 +41,11 @@ func StartSyncWorker(ctx context.Context, s *UntisService, syncSpec string, home
 		}
 	}
 
+	slog.Info("Setting scheduler singleton mode")
 	scheduler.SingletonMode()
+	slog.Info("Starting scheduler async")
 	scheduler.StartAsync()
-	slog.Info("Gocron sync worker started", "sync_schedule", syncSpec, "homework_schedule", homeworkSpec, "cleanup_schedule", cleanupSpec)
+	slog.Info("Gocron scheduler started, logging sync worker ready", "sync_schedule", syncSpec, "homework_schedule", homeworkSpec, "cleanup_schedule", cleanupSpec)
 
 	go func() {
 		<-ctx.Done()
